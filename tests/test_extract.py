@@ -128,4 +128,4 @@ def test_collector_id_filter_is_optional_but_explicit():
     accident of a missing parameter."""
     from netconfig_mirror.extract import LATEST_PER_DEVICE
 
-    assert "%(collector_id)s IS NULL OR" in LATEST_PER_DEVICE
+    assert "%(collector_id)s::text IS NULL OR" in LATEST_PER_DEVICE

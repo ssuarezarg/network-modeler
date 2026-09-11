@@ -91,7 +91,7 @@ SELECT DISTINCT ON (r.device_id, r.command)
   FROM raw_outputs r
   JOIN devices d ON d.id = r.device_id
  WHERE r.command = ANY(%(commands)s)
-   AND (%(collector_id)s IS NULL OR d.collector_id = %(collector_id)s)
+   AND (%(collector_id)s::text IS NULL OR d.collector_id = %(collector_id)s::text)
  ORDER BY r.device_id, r.command, r.collected_at DESC
 """
 
@@ -105,13 +105,17 @@ SELECT r.id, r.device_id, r.command, r.output, r.collected_at,
   JOIN devices d ON d.id = r.device_id
  WHERE r.command = ANY(%(commands)s)
    AND r.collected_at > %(since)s
-   AND (%(collector_id)s IS NULL OR d.collector_id = %(collector_id)s)
+   AND (%(collector_id)s::text IS NULL OR d.collector_id = %(collector_id)s::text)
  ORDER BY r.device_id, r.command, r.collected_at DESC
 """
 
 # One device by hostname. Matched case-insensitively: hostnames are entered by
 # people and `CORE-RTR-01` should find `core-rtr-01`. The devices table is
 # tiny, so losing the index to lower() costs nothing.
+#
+# The ::text casts on collector_id are required, not decorative. A parameter
+# that appears only as `$n IS NULL` gives the planner nothing to infer a type
+# from, and the query fails with "could not determine data type of parameter".
 LATEST_BY_HOSTNAME = """
 SELECT DISTINCT ON (r.device_id)
        r.id, r.device_id, r.command, r.output, r.collected_at,
@@ -121,7 +125,7 @@ SELECT DISTINCT ON (r.device_id)
   JOIN devices d ON d.id = r.device_id
  WHERE lower(d.hostname) = lower(%(hostname)s)
    AND r.command = ANY(%(commands)s)
-   AND (%(collector_id)s IS NULL OR d.collector_id = %(collector_id)s)
+   AND (%(collector_id)s::text IS NULL OR d.collector_id = %(collector_id)s::text)
  ORDER BY r.device_id, r.collected_at DESC
 """
 

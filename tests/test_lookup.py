@@ -104,3 +104,21 @@ def test_connection_is_forced_read_only():
     from netconfig_mirror import extract
 
     assert "TRANSACTION READ ONLY" in inspect.getsource(extract.connect)
+
+
+def test_nullable_parameters_carry_an_explicit_cast():
+    """A parameter used only as `$n IS NULL` gives Postgres nothing to infer a
+    type from: the query fails with "could not determine data type of parameter".
+
+    Caught only by a real server -- the fake connection above never sends SQL to
+    a parser -- so this guards the queries by inspection instead.
+    """
+    from netconfig_mirror.extract import (
+        LATEST_BY_HOSTNAME,
+        LATEST_PER_DEVICE,
+        SINCE_WATERMARK,
+    )
+
+    for sql in (LATEST_BY_HOSTNAME, LATEST_PER_DEVICE, SINCE_WATERMARK):
+        assert "%(collector_id)s IS NULL" not in sql, "uncast nullable parameter"
+        assert "%(collector_id)s::text IS NULL" in sql
