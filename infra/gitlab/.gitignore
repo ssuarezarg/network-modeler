@@ -1,0 +1,7 @@
+# Real deployment values: FQDN, private VNet address, sizing. Never committed.
+.env
+
+# Certificates and keys must never land in the repo, even by accident.
+*.crt
+*.key
+*.pem
