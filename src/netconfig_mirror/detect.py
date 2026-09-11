@@ -119,12 +119,14 @@ def detect(
 
     version = _extract_version(config_text, best)
 
+    version = normalize_version(version)
+
     if hint_platform:
         # Keep the inferred scores in the record even when overridden: a
         # collector hint that contradicts the config is worth being able to see.
         return Detection(
             platform=hint_platform,
-            os_version=hint_version or version,
+            os_version=normalize_version(hint_version) or version,
             confidence="high",
             scores=scores,
             markers=markers,
@@ -133,11 +135,26 @@ def detect(
 
     return Detection(
         platform=best,
-        os_version=hint_version or version,
+        os_version=normalize_version(hint_version) or version,
         confidence=confidence,
         scores=scores,
         markers=markers,
     )
+
+
+def normalize_version(version: str | None) -> str | None:
+    """Keep the version number, drop whatever the platform appended to it.
+
+    Applied to the collector's `devices.os_version` as well as to anything
+    parsed from the config: the database holds values like
+    `10.3(5) [Maintenance Release]`, and the suffix would travel into the model
+    and into any path built from it. The database's original value stays
+    recorded under `source` in meta.yaml, so nothing is lost.
+    """
+    if not version:
+        return None
+    first = version.strip().split()[0] if version.strip() else ""
+    return first or None
 
 
 def _extract_version(config_text: str, platform: str) -> str | None:

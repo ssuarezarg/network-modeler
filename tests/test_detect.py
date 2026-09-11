@@ -74,3 +74,21 @@ def test_nxos_maintenance_release_suffix_is_not_part_of_the_version():
     would otherwise end up in the model and in every path built from it."""
     assert detect("feature bgp\nversion 10.3(5) [Maintenance Release]\n").os_version == "10.3(5)"
     assert detect("feature bgp\nversion 10.6(1) Bios:version\n").os_version == "10.6(1)"
+
+
+def test_collector_metadata_version_is_normalised_too():
+    """The database itself holds `10.3(5) [Maintenance Release]`. The hint wins
+    over the parsed value by design, so cleaning only the parsed one left the
+    suffix in the model."""
+    result = detect("feature bgp\n", hint_platform="nxos",
+                    hint_version="10.3(5) [Maintenance Release]")
+    assert result.os_version == "10.3(5)"
+
+
+def test_ordinary_versions_are_untouched():
+    from netconfig_mirror.detect import normalize_version
+
+    for version in ("15.2", "17.3.3", "9.9(1)", "10.6(1)"):
+        assert normalize_version(version) == version
+    assert normalize_version(None) is None
+    assert normalize_version("  ") is None
