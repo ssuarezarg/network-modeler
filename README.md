@@ -9,12 +9,17 @@ GitLab deployment: [`infra/gitlab/README.md`](infra/gitlab/README.md).
 ## Install
 
 ```bash
-python -m venv .venv && . .venv/bin/activate
-pip install -r requirements.txt
+python3 -m venv .venv && . .venv/bin/activate
+pip install -e '.[db,dev]'
 ```
 
-`psycopg` is only needed for the `device` subcommand. The `file` subcommand runs
-with PyYAML alone.
+**Install the project, do not just install the requirements.** The package lives
+under `src/`, so `python -m netconfig_mirror.cli` from a bare checkout fails with
+`No module named 'netconfig_mirror'` — nothing has put `src/` on the path.
+`pip install -e .` fixes that and provides the `netconfig-mirror` command.
+
+The `db` extra pulls in `psycopg`, needed only by the `device` subcommand; `file`
+runs with PyYAML alone. To skip it: `pip install -e '.[dev]'`.
 
 ## The HMAC key
 
@@ -37,7 +42,7 @@ By hostname, from the database:
 
 ```bash
 export PGHOST=... PGDATABASE=... PGUSER=extractor_ro PGPASSWORD=...
-python -m netconfig_mirror.cli device CORE-RTR-01 --out ./out
+netconfig-mirror device CORE-RTR-01 --out ./out
 ```
 
 Connection settings use the standard libpq environment variables so credentials
@@ -47,7 +52,7 @@ is available for one-offs.
 From a file, no database needed:
 
 ```bash
-python -m netconfig_mirror.cli file ./configs/router.txt --out ./out
+netconfig-mirror file ./configs/router.txt --out ./out
 ```
 
 Each run writes `out/<hostname>/`:

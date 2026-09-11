@@ -1,0 +1,33 @@
+# Packaging. The source lives under src/, which is why `python -m
+# netconfig_mirror.cli` fails from a bare checkout: nothing puts src/ on the
+# path. Installing the project (even in editable mode) is what fixes that, and
+# it also provides the `netconfig-mirror` command.
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "netconfig-mirror"
+version = "0.1.0"
+description = "Model router configurations from the collector database into structured YAML"
+requires-python = ">=3.10"
+dependencies = [
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+# Only the `device` subcommand needs a database driver; `file` runs without it.
+db = ["psycopg[binary]>=3.1"]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+netconfig-mirror = "netconfig_mirror.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+# So `pytest` works from a bare checkout, before the project is installed.
+pythonpath = ["src"]
+testpaths = ["tests"]

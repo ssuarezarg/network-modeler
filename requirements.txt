@@ -1,7 +1,6 @@
-# Runtime. Deliberately minimal: this runs in the viewer environment, where every
-# dependency is something a person has to approve.
+# Convenience pin-free list. Prefer `pip install -e '.[db,dev]'` -- installing the
+# project is what puts the src/ package on the path; installing only these
+# requirements leaves `python -m netconfig_mirror.cli` unable to find it.
 PyYAML>=6.0
-psycopg[binary]>=3.1    # only needed for the `device` subcommand; `file` works without it
-
-# Development
+psycopg[binary]>=3.1
 pytest>=7.0
