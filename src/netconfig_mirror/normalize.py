@@ -51,6 +51,13 @@ _VOLATILE = [
     # where it would disagree with the file we actually write.
     re.compile(r"^\s*!?\s*Current configuration\s*:\s*\d+ bytes", re.I),
     re.compile(r"^\s*!\s*Time source is", re.I),
+    # NX-OS capture header. `!Time:` carries the moment of capture and changes
+    # on every single run - left in, no NX-OS device would ever look unchanged.
+    re.compile(r"^\s*!Time:", re.I),
+    re.compile(r"^\s*!Command:", re.I),
+    re.compile(r"^\s*!Running configuration last done at:", re.I),
+    re.compile(r"^\s*!Startup config saved at:", re.I),
+    re.compile(r"^\s*!No configuration change since last restart", re.I),
     re.compile(r"^\s*!\s*Last configuration change", re.I),
     re.compile(r"^\s*!\s*NVRAM config last updated", re.I),
 ]

@@ -39,6 +39,7 @@ class Interface:
 class Vrf:
     name: str
     rd: str | None = None
+    vni: str | None = None
     description: str | None = None
     import_targets: list[str] = field(default_factory=list)
     export_targets: list[str] = field(default_factory=list)
@@ -98,6 +99,8 @@ class AccessList:
 class Vlan:
     id: str
     name: str | None = None
+    # NX-OS: the VXLAN VNI this VLAN maps to.
+    vn_segment: str | None = None
 
 
 @dataclass
@@ -111,6 +114,19 @@ class Services:
     aaa: list[str] = field(default_factory=list)
     local_users: list[str] = field(default_factory=list)
     domain_name: str | None = None
+
+
+@dataclass
+class NveInterface:
+    """NX-OS VXLAN tunnel endpoint. The VNI list is the fabric's actual reach -
+    which segments this switch participates in - and is the single most useful
+    thing to diff on an EVPN leaf."""
+
+    name: str
+    source_interface: str | None = None
+    host_reachability: str | None = None
+    enabled: bool = True
+    vnis: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -130,6 +146,11 @@ class DeviceModel:
     static_routes: list[StaticRoute] = field(default_factory=list)
     bgp: Bgp | None = None
     ospf: list[Ospf] = field(default_factory=list)
+    # NX-OS: enabled feature set. The closest thing the platform has to a
+    # declaration of what the switch is for, and a feature appearing or
+    # disappearing is a significant change.
+    features: list[str] = field(default_factory=list)
+    nve: NveInterface | None = None
     access_lists: list[AccessList] = field(default_factory=list)
     services: Services = field(default_factory=Services)
 

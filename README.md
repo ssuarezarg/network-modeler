@@ -92,7 +92,8 @@ is chosen from evidence.
 | Platform | Status |
 |---|---|
 | IOS, IOS-XE | supported |
-| ASA, NX-OS, IOS-XR | detected, no parser — reported as unsupported |
+| NX-OS | supported — features, VXLAN/NVE, VLAN-to-VNI, nested BGP |
+| ASA, IOS-XR | detected, no parser — reported as unsupported |
 | Firepower / FTD | out of scope: arrives as `fmc_*` REST endpoints, not a flat config |
 
 An unsupported platform is reported rather than producing an empty model that

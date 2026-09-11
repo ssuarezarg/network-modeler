@@ -27,10 +27,10 @@ from .detect import detect
 from .freshness import DEFAULT_STALE_AFTER
 from .model import DeviceModel
 from .normalize import normalize
-from .parsers import ios
+from .parsers import ios, nxos
 from .redact import RedactionError, redact_or_raise
 
-PARSERS = {"ios": ios, "iosxe": ios}
+PARSERS = {"ios": ios, "iosxe": ios, "nxos": nxos}
 KEY_ENV = "NETCONFIG_MIRROR_HMAC_KEY"
 
 EXIT_OK = 0

@@ -63,10 +63,15 @@ _RULES: list[tuple[str, re.Pattern[str]]] = [
         r"(?P<pre>^\s*snmp-server community\s+)(?P<secret>\S+)", re.M | re.I)),
     # snmp-server user: auth and priv keys, each on the same line
     ("snmp-v3-auth", re.compile(
-        r"(?P<pre>^\s*snmp-server user\s+.*?\bauth\s+\S+\s+)(?P<secret>\S+)", re.M | re.I)),
+        r"(?P<pre>^\s*snmp-server user\s+.*?\bauth\s+\S+\s+(?:encrypted\s+)?)"
+        r"(?P<secret>\S+)", re.M | re.I)),
+    # Privacy key. The cipher spelling differs by platform - IOS writes
+    # `priv aes 128 <key>`, NX-OS writes `priv aes-128 <key>` - and matching
+    # only one of them leaves the key in cleartext on the other.
     ("snmp-v3-priv", re.compile(
-        r"(?P<pre>\bpriv\s+(?:aes\s+\d+\s+|des\s+|3des\s+)?)(?P<secret>\S+)"
-        r"(?=\s*(?:localizedkey|localizedv2key|access|$))", re.M | re.I)),
+        r"(?P<pre>\bpriv\s+(?:(?:aes(?:[-\s]\d+)?|3?des)\s+)?(?:encrypted\s+)?)"
+        r"(?P<secret>\S+)"
+        r"(?=\s+(?:localized\S*key|access)|\s*$)", re.M | re.I)),
     # BGP / routing protocol peer authentication
     ("bgp-password", re.compile(
         r"(?P<pre>^\s*neighbor\s+\S+\s+password(?:\s+\d+)?\s+)(?P<secret>\S+)", re.M | re.I)),
@@ -78,6 +83,14 @@ _RULES: list[tuple[str, re.Pattern[str]]] = [
         r"(?:\s+\d+)?\s+)(?P<secret>\S+)", re.M | re.I)),
     ("aaa-key-sub", re.compile(
         r"(?P<pre>^\s+key\s+(?:\d+\s+)?)(?P<secret>\S+)", re.M | re.I)),
+    # A credential on its own indented line. IOS-XR writes:
+    #     username cisco
+    #      group root-lr
+    #      password 7 <hash>
+    # so the value never appears on the `username` line the other rules expect.
+    ("standalone-credential", re.compile(
+        r"(?P<pre>^\s+(?:password|secret)(?:\s+\d+)?\s+)(?P<secret>\S+)\s*$",
+        re.M | re.I)),
     # PPP/CHAP
     ("ppp", re.compile(
         r"(?P<pre>^\s*ppp (?:chap|pap sent-username \S+) password(?:\s+\d+)?\s+)"
@@ -119,6 +132,14 @@ _LEAK_SHAPES = [
     re.compile(r"\$(?:1|5|6|8|9)\$[^\s<]{6,}"),          # unix-style hashes
     re.compile(r"\bpassword\s+7\s+[0-9A-Fa-f]{8,}"),      # Cisco type 7
 ]
+
+# A long run of hex on a credential-bearing line is almost certainly key
+# material. Used only on suspect lines, so ordinary hex elsewhere is untouched.
+_HEX_SECRET = re.compile(r"(?<![\w$:.-])[0-9A-Fa-f]{16,}(?![\w:.-])")
+
+# Long hex that is legitimately not a secret. An SNMP engine ID identifies the
+# agent and is not key material; flagging it would block devices for no reason.
+_BENIGN_HEX_CONTEXT = re.compile(r"\bengine(?:id|-id)\b", re.I)
 
 
 @dataclass
@@ -190,6 +211,11 @@ def redact(config_text: str, key: bytes) -> tuple[str, RedactionReport]:
     for name, pattern in _RULES:
         def _sub(match: re.Match[str], _name: str = name) -> str:
             secret = match.group("secret")
+            if secret.startswith("<redacted:"):
+                # Already replaced by an earlier rule. Without this guard a
+                # broader rule can tokenise a token, and the second token would
+                # no longer track the underlying value at all.
+                return match.group(0)
             if is_upstream_sanitised(secret):
                 # Already masked by the viewer. Leave the line exactly as it
                 # arrived; rewriting it would misattribute the redaction.
@@ -213,17 +239,38 @@ def audit_residuals(redacted_text: str) -> list[tuple[int, str]]:
     residuals: list[tuple[int, str]] = []
 
     for lineno, line in enumerate(redacted_text.splitlines(), start=1):
-        if "<redacted:" in line or "[OMITTED_BY_SANITIZER]" in line:
-            continue
-        if _SUSPECT_LINE.match(line) and not _BENIGN.match(line):
+        handled = "<redacted:" in line or "[OMITTED_BY_SANITIZER]" in line
+        suspect = bool(_SUSPECT_LINE.match(line)) and not _BENIGN.match(line)
+
+        if suspect and not handled:
             residuals.append((lineno, _safe_excerpt(line)))
             continue
+
+        # A line can carry more than one secret. `snmp-server user ... auth md5
+        # <key> priv aes-128 <key>` holds two, and treating the line as handled
+        # because the first one was replaced let the second through with the
+        # audit reporting nothing. Being partially redacted is not proof of
+        # being safe, so keep checking.
+        if suspect and _unredacted_key_material(line):
+            residuals.append((lineno, _safe_excerpt(line)))
+            continue
+
         for shape in _LEAK_SHAPES:
             if shape.search(line):
                 residuals.append((lineno, _safe_excerpt(line)))
                 break
 
     return residuals
+
+
+def _unredacted_key_material(line: str) -> bool:
+    """Long hex on a credential line that is not an engine ID."""
+    for match in _HEX_SECRET.finditer(line):
+        before = line[max(0, match.start() - 40):match.start()]
+        if _BENIGN_HEX_CONTEXT.search(before):
+            continue
+        return True
+    return False
 
 
 def redact_or_raise(config_text: str, key: bytes) -> tuple[str, RedactionReport]:

@@ -108,3 +108,68 @@ def test_value_less_credential_line_is_not_a_residual():
 
 def test_snmp_user_without_auth_clause_is_benign():
     assert not audit_residuals("snmp-server user wcsuser wcsuser v3\n")
+
+
+def test_two_secrets_on_one_line_are_both_redacted():
+    """NX-OS puts the auth key and the privacy key on the same line. Redacting
+    only the first left the second in cleartext -- and the audit passed it,
+    because a line containing a token looked handled."""
+    line = ("snmp-server user admin network-admin auth md5 AUTHKEY1234567890 "
+            "priv aes-128 PRIVKEY0987654321 localizedV2key\n")
+    out, report = redact(line, KEY)
+    assert "AUTHKEY1234567890" not in out
+    assert "PRIVKEY0987654321" not in out
+    assert report.clean
+
+
+def test_partially_redacted_line_is_still_audited():
+    """Being partly redacted is not proof of being safe."""
+    partial = ("snmp-server user admin grp auth md5 <redacted:aabbccdd> "
+               "priv aes-128 0123456789ABCDEF0123 localizedV2key\n")
+    assert audit_residuals(partial)
+
+
+def test_nxos_and_ios_privacy_cipher_spellings():
+    """IOS writes `priv aes 128`, NX-OS writes `priv aes-128`. Matching only one
+    leaves the key in cleartext on the other platform."""
+    for spelling in ("aes 128", "aes-128", "aes-256", "des", "3des"):
+        line = f"snmp-server user u g auth sha AUTH1234567890AB priv {spelling} SECRETKEY123456789\n"
+        out, report = redact(line, KEY)
+        assert "SECRETKEY123456789" not in out, spelling
+        assert report.clean, spelling
+
+
+def test_iosxr_encrypted_keyword_between_algorithm_and_hash():
+    line = ("snmp-server user snmpv3adm V3-RO-GROUP v3 auth sha encrypted "
+            "022A05592A131B297C4F1A priv aes 128 encrypted 12350415221905121A\n")
+    out, report = redact(line, KEY)
+    assert "022A05592A131B297C4F1A" not in out
+    assert "12350415221905121A" not in out
+    assert report.clean
+
+
+def test_iosxr_credential_on_an_indented_child_line():
+    """IOS-XR writes the password under `username`, not on the same line:
+        username cisco
+         password 7 <hash>
+    so every rule keyed to the username line misses it."""
+    config = "username cisco\n group root-lr\n password 7 04785A150C2E1D1C5A4D50\n"
+    out, report = redact(config, KEY)
+    assert "04785A150C2E1D1C5A4D50" not in out
+    assert report.clean
+
+
+def test_a_token_is_never_tokenised_again():
+    """A broader rule running after a narrower one must leave the existing token
+    alone; re-hashing it would stop it tracking the underlying value."""
+    once, _ = redact("username admin secret 9 $9$realhash\n", KEY)
+    twice, _ = redact(once, KEY)
+    assert once == twice
+
+
+def test_snmp_engine_id_is_not_reported_as_a_leak():
+    """An engine ID is long hex but identifies the agent, not key material.
+    Flagging it would block devices for no reason."""
+    line = ("snmp-server user u g v3 engineID 80000009fe9455adb4856c56308530364cd3 "
+            "encrypted auth sha <redacted:aabbccdd>\n")
+    assert not audit_residuals(line)
