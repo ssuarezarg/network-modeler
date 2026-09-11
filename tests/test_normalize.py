@@ -78,3 +78,11 @@ def test_crlf_and_lf_normalise_identically():
 def test_lone_cr_is_treated_as_a_line_break():
     out, _ = normalize("hostname R1\rinterface Gi0/0\r")
     assert out == "hostname R1\ninterface Gi0/0\n"
+
+
+def test_byte_count_header_without_a_leading_bang_is_dropped():
+    """Real captures emit this line both with and without the `!`. Requiring it
+    let the count through into the stored config, where it disagreed with the
+    file actually written."""
+    out, _ = normalize("Current configuration : 12345 bytes\nhostname R1\n")
+    assert "12345" not in out

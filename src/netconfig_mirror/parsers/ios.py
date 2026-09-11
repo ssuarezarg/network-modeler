@@ -41,6 +41,10 @@ _ACKNOWLEDGED = re.compile(
     r"|udld\b|power\b|system\b|clock\b|crypto\b|line\b|banner\b|alias\b"
     r"|privilege\b|parser\b|file\b|call-home\b|cdp\b|lldp\b|track\b|event\b"
     r"|control-plane\b|end\b|exit\b|port-channel\b|login\b|flow\b"
+    # Seen on real IOS-XE 17 edge routers. DHCP pools are genuine configuration
+    # and a reasonable thing to model later; recognised for now so they are not
+    # reported as unknown.
+    r"|ip\s+dhcp\b|security\b|exception\b|ipv6\b|vstack\b|ethernet\b"
     # ip-prefixed globals that are not addressing.
     r"|ip\s+(?:subnet-zero|source-route|classless|cef|domain[-\s]lookup|ssh"
     r"|forward-protocol|http|ftp|bootp|finger|tcp|icmp|routing|scp|tftp|tacacs"

@@ -46,7 +46,10 @@ _VOLATILE = [
     re.compile(r"^\s*ntp clock-period\b", re.I),
     re.compile(r"^\s*Building configuration", re.I),
     # Byte count changes with any edit, including ones we redact away.
-    re.compile(r"^\s*!\s*Current configuration\s*:\s*\d+ bytes", re.I),
+    # The leading `!` is optional: real captures emit this line both ways, and
+    # requiring it let the byte count through into the stored configuration,
+    # where it would disagree with the file we actually write.
+    re.compile(r"^\s*!?\s*Current configuration\s*:\s*\d+ bytes", re.I),
     re.compile(r"^\s*!\s*Time source is", re.I),
     re.compile(r"^\s*!\s*Last configuration change", re.I),
     re.compile(r"^\s*!\s*NVRAM config last updated", re.I),
