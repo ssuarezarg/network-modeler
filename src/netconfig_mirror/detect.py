@@ -64,7 +64,10 @@ _MARKERS: dict[str, list[tuple[re.Pattern[str], int]]] = {
 
 _VERSION_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("asa", re.compile(r"^ASA Version (\S+)", re.M)),
-    ("nxos", re.compile(r"^version (\d+\.\d+\(\S+\))", re.M)),
+    # Stop at the closing paren: `version 10.3(5) [Maintenance Release]` and
+    # `version 10.6(1) Bios:version` both carry trailing text that is not part
+    # of the version number.
+    ("nxos", re.compile(r"^version (\d+\.\d+\([^)]*\))", re.M)),
     ("*", re.compile(r"^version (\d+\.\d+\S*)", re.M)),
 ]
 

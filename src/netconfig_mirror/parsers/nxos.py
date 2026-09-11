@@ -48,6 +48,11 @@ _ACKNOWLEDGED = re.compile(
     r"|ip\s+community-list\b|ip\s+as-path\b|class-map\b|policy-map\b|table-map\b"
     r"|control-plane\b|spanning-tree\b|port-channel\b|errdisable\b|lacp\b"
     r"|vpc\b|track\b|object-group\b|key\b|aaa\b|tacacs\b|radius\b|license\b"
+    # Seen on real NX-OS 9.3 / 10.3 switches. SPAN sessions, the config archive,
+    # NetFlow/Analytics records and BFD are all genuine configuration; recognised
+    # here rather than reported as unknown, and each is a candidate to model.
+    r"|monitor\b|archive\b|flow\b|bfd\b|crypto\b|icam\b|login\b|ip\s+tcp\b"
+    r"|ip\s+access-list\b|mac\b|ethanalyzer\b|ngoam\b|sflow\b|analytics\b"
     r"|install\b|end\b|exit\b|configure\b|slot\b|powerredundancymode\b"
     r")",
     re.I,
@@ -112,8 +117,11 @@ def _device(doc: ConfigDocument, platform: str | None, os_version: str | None) -
         doc.consume(block)
     if os_version is None:
         for block in doc.find(r"version\s+\d"):
-            # `version 10.6(1) Bios:version` - take the NX-OS version only.
-            match = re.match(r"version\s+(\S+)", block.header)
+            # Real captures carry trailing text that is not part of the
+            # version: `version 10.6(1) Bios:version` and
+            # `version 10.3(5) [Maintenance Release]`. Take the version alone,
+            # or it ends up in the model and in every path built from it.
+            match = re.match(r"version\s+(\d+\.\d+\([^)]*\)|\S+)", block.header)
             if match:
                 os_version = match.group(1)
     return Device(hostname=hostname, platform=platform, os_version=os_version)

@@ -67,3 +67,10 @@ def test_unrecognised_input_is_not_guessed():
     result = detect("this is not a network configuration at all\n")
     assert result.platform == "unknown"
     assert result.confidence == "none"
+
+
+def test_nxos_maintenance_release_suffix_is_not_part_of_the_version():
+    """Real captures read `version 10.3(5) [Maintenance Release]`. The suffix
+    would otherwise end up in the model and in every path built from it."""
+    assert detect("feature bgp\nversion 10.3(5) [Maintenance Release]\n").os_version == "10.3(5)"
+    assert detect("feature bgp\nversion 10.6(1) Bios:version\n").os_version == "10.6(1)"
