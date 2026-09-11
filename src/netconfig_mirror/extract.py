@@ -34,6 +34,7 @@ but it is only safe against a column that is monotonic *on arrival in the viewer
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -336,10 +337,57 @@ def connect(dsn: str | None = None):
                 "or from --dsn."
             )
 
-    connection = psycopg.connect(dsn) if dsn else psycopg.connect()
+    try:
+        connection = psycopg.connect(dsn) if dsn else psycopg.connect()
+    except psycopg.OperationalError as error:
+        raise SystemExit(_connection_help(dsn, error)) from None
+
     with connection.cursor() as cursor:
         cursor.execute("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY")
     return connection
+
+
+def _connection_help(dsn: str | None, error: Exception) -> str:
+    """Turn a libpq connection failure into something actionable.
+
+    Worth the effort for one case in particular: with no settings at all, libpq
+    silently defaults to a local Unix socket and the resulting error talks about
+    a missing socket file rather than about the configuration nobody supplied.
+    That sends people looking for a Postgres server on the wrong machine.
+    """
+    configured = [name for name in ("PGHOST", "PGPORT", "PGDATABASE", "PGUSER")
+                  if os.environ.get(name)]
+
+    lines = [f"Could not connect to the database: {error}".rstrip(), ""]
+
+    if not dsn and not configured:
+        lines += [
+            "No connection settings were given, so libpq fell back to a local Unix",
+            "socket - which is why the error mentions a socket file rather than a",
+            "host. Set the standard variables (they keep the password off the",
+            "command line, where ps and shell history would see it):",
+            "",
+            "    export PGHOST=127.0.0.1 PGPORT=5432",
+            "    export PGDATABASE=netcollector PGUSER=extractor_ro",
+            "    export PGPASSWORD=...",
+            "",
+            "If the viewer's Postgres runs in Docker, find it with:",
+            "",
+            "    docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Ports}}'",
+            "",
+            "A container showing 0.0.0.0:5432->5432/tcp is reachable at PGHOST=127.0.0.1.",
+            "One showing only 5432/tcp publishes no port to the host; connect over the",
+            "compose network instead, or read its settings with:",
+            "",
+            "    docker inspect <container> --format '{{range .Config.Env}}{{println .}}{{end}}'",
+        ]
+    else:
+        shown = ", ".join(f"{n}={os.environ[n]}" for n in configured) or f"--dsn {dsn!r}"
+        lines += [f"Using: {shown}", "",
+                  "Check the host and port are reachable from this machine, that the",
+                  "database name is right, and that the role may connect."]
+
+    return "\n".join(lines)
 
 
 def fetch_by_hostname(
