@@ -21,7 +21,7 @@ from pathlib import Path
 
 import yaml
 
-from . import extract
+from . import envfile, extract
 from .blocks import ConfigDocument
 from .detect import detect
 from .freshness import DEFAULT_STALE_AFTER
@@ -213,6 +213,9 @@ def _common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--platform", help="override platform detection")
     parser.add_argument("--show-unmodelled", type=int, default=15,
                         help="how many unrecognised command prefixes to list")
+    parser.add_argument("--env-file", default=None,
+                        help="settings file to load (default: ./.env if present). "
+                             "Real environment variables always win over it.")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -234,6 +237,9 @@ def main(argv: list[str] | None = None) -> int:
     from_file.set_defaults(func=cmd_file)
 
     args = parser.parse_args(argv)
+    # Loaded before anything reads the environment, and never over the top of
+    # variables that are already set.
+    envfile.load(getattr(args, "env_file", None))
     return args.func(args)
 
 

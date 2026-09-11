@@ -13,6 +13,12 @@ customer_configs/
 *.key
 .hmac-key
 
+# Database credentials. .env.example is the committed template; .env itself
+# holds a real password and must never be committed.
+.env
+.env.*
+!.env.example
+
 # Pipeline output. Models are written to disk locally; committing them is a
 # later stage and will target a separate mirror repository, not this one.
 out/

@@ -41,13 +41,18 @@ at once, which shows up as a spurious diff on every device simultaneously.
 By hostname, from the database:
 
 ```bash
-export PGHOST=... PGDATABASE=... PGUSER=extractor_ro PGPASSWORD=...
+cp .env.example .env && chmod 600 .env    # fill in host, database, credentials
 netconfig-mirror device CORE-RTR-01 --out ./out
 ```
 
-Connection settings use the standard libpq environment variables so credentials
-stay off the command line, where `ps` and shell history would see them. `--dsn`
-is available for one-offs.
+`.env` is read from the working directory (or `--env-file`), and is gitignored.
+It uses the standard libpq variable names, so real environment variables — from
+a shell export, systemd, or a container — always take precedence over the file.
+That way one setting can be overridden for a single run, and a scheduled job's
+configuration cannot be replaced by a stale `.env` someone left behind.
+
+Credentials never go on the command line, where `ps` and shell history would see
+them. `--dsn` is available for one-offs.
 
 From a file, no database needed:
 
