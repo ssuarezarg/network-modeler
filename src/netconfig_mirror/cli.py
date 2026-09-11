@@ -158,11 +158,10 @@ def _finish(args, config_text, key, capture=None, name_fallback="device") -> int
         return EXIT_REDACTION_REFUSED
 
     if model is None:
-        print(f"No parser for platform '{detection.platform}' "
-              f"({detection.confidence} confidence).", file=sys.stderr)
-        print("Supported today: ios, iosxe. ASA, NX-OS and IOS-XR need their own "
-              "parsers; reporting this rather than emitting an empty model that "
-              "would look valid.", file=sys.stderr)
+        name = (capture.device_key if capture else None) or name_fallback
+        out_dir = _write_unparsed(Path(args.out), name, detection, provenance,
+                                  redaction, redacted, capture)
+        _explain_no_parser(detection, redacted, out_dir)
         return EXIT_NO_PARSER
 
     name = (capture.device_key if capture else None) or model.device.hostname or name_fallback
@@ -171,6 +170,63 @@ def _finish(args, config_text, key, capture=None, name_fallback="device") -> int
     print(f"wrote {out_dir}/device.yaml")
     report(doc, detection, redaction, args.show_unmodelled, capture)
     return EXIT_OK
+
+
+def _write_unparsed(out_root: Path, name: str, detection, provenance, redaction,
+                    redacted: str, capture) -> Path:
+    """Save the capture even though it could not be modelled.
+
+    Throwing the fetch away on a detection failure leaves nobody able to see
+    what actually came back, which is the one thing needed to fix it.
+    """
+    out_dir = out_root / name
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "raw.cfg").write_text(redacted, encoding="utf-8")
+    (out_dir / "meta.yaml").write_text(yaml.safe_dump({
+        "status": "unparsed",
+        "platform": detection.platform,
+        "detection_confidence": detection.confidence,
+        "detection_scores": detection.scores,
+        "os_version": detection.os_version,
+        "redaction": {"tokens_written": redaction.total,
+                      "upstream_sanitised": redaction.upstream_sanitised},
+        "provenance": provenance.as_dict(),
+        "source": ({"row_id": capture.row_id, "command": capture.command,
+                    "collected_at": capture.collected_at.isoformat(),
+                    "vendor": capture.vendor, "os_version": capture.os_version}
+                   if capture else None),
+    }, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    return out_dir
+
+
+def _explain_no_parser(detection, redacted: str, out_dir: Path) -> None:
+    out = sys.stderr
+    print(f"No parser for platform '{detection.platform}' "
+          f"({detection.confidence} confidence).", file=out)
+    print("Supported today: ios, iosxe. ASA, NX-OS and IOS-XR need their own "
+          "parsers.", file=out)
+
+    if detection.scores:
+        ranked = ", ".join(f"{name}={score}" for name, score in
+                           sorted(detection.scores.items(), key=lambda kv: -kv[1]))
+        print(f"\nDetection scores : {ranked}", file=out)
+    else:
+        # Zero markers is a different situation from "an unsupported platform".
+        # It usually means the stored text is not a flat CLI configuration at
+        # all: a collector error message, a JSON payload, or an empty capture.
+        print("\nNo platform marker matched at all. That is usually not an "
+              "unsupported\nplatform - it more often means the stored output is "
+              "not a CLI configuration:\nan error string the collector saved, a "
+              "JSON payload, or an empty capture.", file=out)
+
+    lines = redacted.split("\n")
+    print(f"\nCapture is {len(redacted)} bytes, {len(lines)} lines. "
+          f"First 15, redacted:", file=out)
+    print("-" * 68, file=out)
+    for line in lines[:15]:
+        print(f"  {line[:100]}", file=out)
+    print("-" * 68, file=out)
+    print(f"\nFull redacted capture saved to {out_dir}/raw.cfg", file=out)
 
 
 def cmd_device(args: argparse.Namespace) -> int:
