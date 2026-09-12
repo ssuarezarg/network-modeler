@@ -204,21 +204,46 @@ worth the same as one that never does.
 
 ```
 inventory/
-  <site>/
+  <site>/             # devices.location: LD5, DC4, AM5, CLL, ...
     <device>/
-      device.yaml     # L1/L2 structured model, schema-validated
-      raw.cfg         # L0 redacted verbatim config
-      meta.yaml       # provenance: source row, captured_at, hashes, coverage %
-schemas/
-  device.v1.schema.json
+      device.yaml     # structured model
+      raw.cfg         # redacted configuration, verbatim
+      meta.yaml       # provenance and coverage; written only when content changed
 reports/
-  coverage.md         # per-device coverage, regenerated each run
+  freshness.md        # devices that stopped being captured
 ```
 
+`reports/freshness.md` lists **only stale devices**, with healthy ones reduced to a
+count. The obvious version tabulates every device with its last capture time - and
+every run brings a fresh capture, so every row moves, so the file changes daily. A
+staleness report that produces a daily commit is the same churn this project exists to
+detect, reintroduced by the tool meant to detect it.
+
 **Commit granularity:** one commit per pipeline run, touching only the devices that
-actually changed. The subject names the site and change count; the body lists the
-devices. `git log -- inventory/LAC1/<device>/` still gives clean per-device history,
-so per-device commits buy nothing and add noise.
+actually changed. The subject names the change count; the body lists the devices.
+`git log -- inventory/<site>/<device>/` still gives clean per-device history, so
+per-device commits buy nothing and add noise.
+
+**Provenance is written only alongside a real change.** `meta.yaml` carries
+`collected_at` and `row_id`, which move on every capture whether or not the device
+did. Writing it unconditionally would dirty every device nightly and commit a change
+that is not one. Writing it only when the content beside it changed also makes its
+timestamp mean the right thing: *when the configuration we are holding was captured*,
+not when we last looked.
+
+**Collisions resolve by `device_id`, not by structure.** The obvious fix for two
+devices sharing a name is to add the datacenter or the tenant to the path, and in this
+estate it does not work: the one real collision is two devices both called `Kernel`, in
+the same site and the same collector. A colliding name therefore takes a short suffix
+derived from the stable `device_id`. Getting this wrong fails silently - two devices in
+one directory produce no error, just a device that appears to reconfigure itself
+completely every day.
+
+**Deletion is defended against.** A device absent from the database may be
+decommissioned, or the collector may have broken - and the two look identical. Removals
+are only considered on a complete, unfiltered run, and a run that would remove more
+than 10% of the mirror refuses. An upstream outage must not be able to empty the
+history.
 
 ---
 

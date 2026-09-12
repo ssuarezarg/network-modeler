@@ -71,11 +71,17 @@ def assess(
 def render_report(freshness: list[Freshness], *, stale_after: timedelta = DEFAULT_STALE_AFTER) -> str:
     """Deterministic Markdown for `reports/freshness.md`.
 
-    Contains no value that moves on its own. The only things that can change are
-    a new capture timestamp or a state transition, so this file sits still until
-    something real happens - and then the diff says exactly what.
+    **Only stale devices are listed, and healthy ones contribute a count.** The
+    obvious version of this report tabulates every device with its last capture
+    time - and every run brings a fresh capture, so every timestamp moves, so the
+    file changes on every single run whether or not anything happened. A
+    staleness report that produces a daily commit is the same churn this project
+    exists to avoid, reintroduced by the tool meant to detect it.
+
+    What remains can only change when something real does: a device crossing the
+    threshold, or the size of the estate changing.
     """
-    stale = [f for f in freshness if f.is_stale]
+    stale = sorted((f for f in freshness if f.is_stale), key=lambda f: f.device_key)
 
     lines = [
         "# Capture freshness",
@@ -86,15 +92,17 @@ def render_report(freshness: list[Freshness], *, stale_after: timedelta = DEFAUL
         "diff of its own: its configuration simply stops changing, which is",
         "indistinguishable from a device that is genuinely stable.",
         "",
-        f"**{len(stale)} stale / {len(freshness)} total**",
+        f"**{len(stale)} stale of {len(freshness)} devices**",
         "",
-        "| Device | Last capture (UTC) | State |",
-        "|---|---|---|",
     ]
 
-    for item in freshness:
-        stamp = item.collected_at.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M")
-        marker = "**stale**" if item.is_stale else "fresh"
-        lines.append(f"| {item.device_key} | {stamp} | {marker} |")
+    if not stale:
+        lines.append("Every device has been captured recently.")
+        return "\n".join(lines) + "\n"
+
+    lines += ["| Device | Last capture (UTC) |", "|---|---|"]
+    for item in stale:
+        stamp = item.collected_at.astimezone(timezone.utc).strftime("%Y-%m-%d")
+        lines.append(f"| {item.device_key} | {stamp} |")
 
     return "\n".join(lines) + "\n"

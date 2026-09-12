@@ -22,9 +22,10 @@ from pathlib import Path
 import yaml
 
 from . import batch as batchlib
-from . import envfile, extract, inventory, layout
+from . import envfile, extract, gitops, inventory, layout
 from .blocks import ConfigDocument
 from .detect import detect
+from . import freshness as freshnesslib
 from .freshness import DEFAULT_STALE_AFTER
 from .model import DeviceModel
 from .normalize import normalize
@@ -40,6 +41,8 @@ EXIT_NO_PARSER = 3
 EXIT_NOT_FOUND = 4
 # Batch completed, but something needs a person to look at it.
 EXIT_BATCH_ATTENTION = 5
+# The repository could not be used as given.
+EXIT_REPO = 6
 
 
 def load_key(key_file: str | None) -> bytes:
@@ -87,6 +90,13 @@ def write_outputs(out_root: Path, name: str, model: DeviceModel, doc, detection,
         encoding="utf-8")
     (out_dir / "raw.cfg").write_text(redacted, encoding="utf-8")
 
+    meta = _meta(detection, doc, provenance, redaction, capture)
+    (out_dir / "meta.yaml").write_text(
+        yaml.safe_dump(meta, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    return out_dir
+
+
+def _meta(detection, doc, provenance, redaction, capture) -> dict:
     meta = {
         "platform": detection.platform,
         "os_version": detection.os_version,
@@ -116,10 +126,7 @@ def write_outputs(out_root: Path, name: str, model: DeviceModel, doc, detection,
             "collector_id": capture.collector_id,
             "location": capture.location,
         }
-
-    (out_dir / "meta.yaml").write_text(
-        yaml.safe_dump(meta, sort_keys=False, allow_unicode=True), encoding="utf-8")
-    return out_dir
+    return meta
 
 
 def report(doc, detection, redaction, show_unmodelled: int, capture=None) -> None:
@@ -338,6 +345,131 @@ def _model_one(capture, key: bytes, args, collisions) -> "batchlib.DeviceResult"
     return result
 
 
+def cmd_sync(args: argparse.Namespace) -> int:
+    """Model the estate and commit the result to the mirror repository."""
+    key = load_key(args.key_file)
+    repo = gitops.MirrorRepo(args.repo)
+
+    try:
+        repo.ensure_ready()
+    except gitops.GitError as error:
+        print(str(error), file=sys.stderr)
+        return EXIT_REPO
+
+    connection = extract.connect(args.dsn)
+    try:
+        captures = extract.fetch(connection, collector_id=args.collector_id)
+    finally:
+        connection.close()
+
+    collisions = layout.find_collisions(captures)
+    selected = [c for c in captures if _matches(c, args)]
+    complete_run = not (args.site or args.vendor or args.collector_id)
+
+    repo.ensure_readme()
+    existing = repo.existing_devices()
+    sync = gitops.SyncReport()
+    report = batchlib.BatchReport(skipped_filtered=len(captures) - len(selected))
+    keep: set[str] = set()
+
+    for capture in sorted(selected, key=lambda c: (layout.site_of(c), c.device_key)):
+        relative = layout.device_path(capture, collisions)
+
+        # Move before writing, so a renamed device keeps its history rather than
+        # appearing as one deletion and one birth.
+        previous = existing.get(capture.device_id)
+        if previous and previous != relative and (repo.path / previous).is_dir():
+            repo.move(previous, relative)
+            sync.renamed.append((previous, relative))
+
+        result = _sync_one(repo, capture, key, args, relative, sync)
+        report.results.append(result)
+        if result.outcome == batchlib.OK:
+            keep.add(relative)
+
+    try:
+        sync.removed = repo.prune(keep, complete_run=complete_run)
+    except gitops.GitError as error:
+        print(f"\n{error}", file=sys.stderr)
+        return EXIT_REPO
+
+    modelled = [r for r in report.results if r.outcome == batchlib.OK]
+    repo.write_report("freshness.md", freshnesslib.render_report(
+        freshnesslib.assess(
+            [c for c in selected
+             if layout.device_path(c, collisions) in keep])))
+
+    sites = sorted({r.site for r in modelled})
+    commit = repo.commit(gitops.build_message(sync, sites=sites if not complete_run else None))
+    sync.committed = commit
+
+    print(batchlib.render_summary(report))
+    if commit:
+        print(f"\ncommitted {commit}: {len(sync.changed)} changed, "
+              f"{len(sync.renamed)} renamed, {len(sync.removed)} removed")
+        if args.push:
+            repo.push()
+            sync.pushed = True
+            print("pushed")
+    else:
+        # The normal outcome on a network that did not change, and the point of
+        # the whole exercise: silence means nothing moved.
+        print("\nnothing changed; no commit")
+
+    return EXIT_BATCH_ATTENTION if report.needs_attention else EXIT_OK
+
+
+def _sync_one(repo, capture, key: bytes, args, relative: str,
+              sync: "gitops.SyncReport") -> "batchlib.DeviceResult":
+    result = batchlib.DeviceResult(
+        hostname=capture.hostname or capture.device_id,
+        site=layout.site_of(capture), outcome=batchlib.OK,
+        collected_at=capture.collected_at, path=relative)
+
+    attempt, detail = batchlib.should_attempt(capture)
+    if not attempt:
+        result.outcome, result.detail = batchlib.TOO_SMALL, detail
+        return result
+
+    try:
+        model, doc, detection, provenance, redaction, redacted = build_model(
+            capture.output, key, hint_platform=args.platform,
+            hint_version=capture.os_version)
+    except RedactionError as error:
+        result.outcome, result.detail = batchlib.REDACTION_REFUSED, str(error)
+        return result
+    except Exception as error:  # noqa: BLE001 - one device must not stop the run
+        result.outcome, result.detail = batchlib.ERROR, f"{type(error).__name__}: {error}"
+        return result
+
+    result.platform = detection.platform
+    if model is None:
+        result.outcome, result.detail = batchlib.NO_PARSER, f"platform {detection.platform}"
+        return result
+
+    result.modelled_pct = round(doc.coverage() * 100, 1)
+    result.accounted_pct = round(doc.accounted() * 100, 1)
+
+    changed = repo.write_content(
+        relative,
+        yaml.safe_dump(model.to_dict(), sort_keys=False, default_flow_style=False,
+                       allow_unicode=True, width=100),
+        redacted)
+
+    if changed:
+        # Provenance is written only alongside a real change, so `collected_at`
+        # reads as "when the configuration we hold was captured" rather than
+        # "when we last looked" - and an unchanged device stays untouched.
+        repo.write_meta(relative, yaml.safe_dump(
+            _meta(detection, doc, provenance, redaction, capture),
+            sort_keys=False, allow_unicode=True))
+        sync.changed.append(relative)
+        print(f"  changed  {relative[len(layout.ROOT) + 1:]}")
+
+    sync.written.append(relative)
+    return result
+
+
 def cmd_inventory(args: argparse.Namespace) -> int:
     """Survey the estate: platforms, sites, tenants, collisions, bad captures."""
     connection = extract.connect(args.dsn)
@@ -393,6 +525,18 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--collector-id", help="limit to one tenant")
     _common(run)
     run.set_defaults(func=cmd_batch)
+
+    sync = sub.add_parser(
+        "sync", help="model the estate and commit the result to the mirror repository")
+    sync.add_argument("--repo", required=True,
+                      help="path to the mirror repository working tree")
+    sync.add_argument("--push", action="store_true", help="push after committing")
+    sync.add_argument("--site", help="only this location")
+    sync.add_argument("--vendor", help="only this devices.vendor value")
+    sync.add_argument("--dsn", help="libpq connection string (default: PG* env vars)")
+    sync.add_argument("--collector-id", help="limit to one tenant")
+    _common(sync)
+    sync.set_defaults(func=cmd_sync)
 
     survey = sub.add_parser(
         "inventory", help="survey the estate: platforms, sites, tenants, "

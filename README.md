@@ -68,6 +68,22 @@ upstream, `capture too small` is a collector fault, `no parser` is a known gap �
 and reports mean coverage per platform plus any device that has stopped being
 captured.
 
+Commit the result to the mirror repository:
+
+```bash
+netconfig-mirror sync --repo /srv/network-mirror --push
+netconfig-mirror sync --repo /srv/network-mirror --site DC4
+```
+
+A run where nothing changed produces **no commit** — that silence is the point.
+Provenance (`meta.yaml`) is rewritten only beside a real content change, so the
+capture timestamps that move every night do not manufacture a daily diff.
+
+A renamed device is `git mv`d so its history follows it. Devices that left the
+database are removed only on a complete run, and a run that would remove more
+than 10% of the mirror refuses: a collector that stopped reporting looks exactly
+like a mass decommissioning.
+
 Survey the estate before deciding anything:
 
 ```bash
@@ -131,6 +147,7 @@ would look valid.
 | 3 | no parser for the detected platform |
 | 4 | device not found, ambiguous, or never captured |
 | 5 | batch finished, but something needs a person to look at it |
+| 6 | the mirror repository could not be used as given |
 
 Code 2 is the one to take seriously. Since the viewer sanitises upstream, it
 most likely means **that** sanitiser has a gap — a finding to report there, not

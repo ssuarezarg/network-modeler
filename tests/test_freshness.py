@@ -48,6 +48,27 @@ def test_report_does_not_change_when_nothing_changes():
     assert first == later
 
 
+def test_a_new_capture_of_healthy_devices_does_not_change_the_report():
+    """The case that actually happens: every run brings fresh captures with new
+    timestamps. Tabulating every device would move every row, producing a commit
+    every day for a network that did not change."""
+    monday = [_capture("r1", days_ago=1), _capture("r2", days_ago=2)]
+    tuesday = [_capture("r1", days_ago=0.1), _capture("r2", days_ago=0.2)]
+    assert render_report(assess(monday, now=NOW)) == render_report(assess(tuesday, now=NOW))
+
+
+def test_healthy_devices_are_counted_not_listed():
+    out = render_report(assess([_capture("r1", days_ago=1)], now=NOW))
+    assert "r1" not in out
+    assert "0 stale of 1" in out
+
+
+def test_a_stale_device_is_named_with_its_last_capture_date():
+    out = render_report(assess([_capture("abandoned-sw", days_ago=90)], now=NOW))
+    assert "abandoned-sw" in out
+    assert "1 stale of 1" in out
+
+
 def test_report_changes_when_a_device_goes_stale():
     captures = [_capture("r1", days_ago=6)]
     before = render_report(assess(captures, now=NOW))
