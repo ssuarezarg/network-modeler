@@ -328,7 +328,12 @@ def _model_one(capture, key: bytes, args, collisions) -> "batchlib.DeviceResult"
     result.path = relative
     result.modelled_pct = round(doc.coverage() * 100, 1)
     result.accounted_pct = round(doc.accounted() * 100, 1)
-    print(f"  {site}/{capture.device_key:<26} {detection.platform:<6} "
+    # Print the path actually written, not a reconstruction of it. Showing
+    # `site/hostname` hid the collision suffix, so two colliding devices printed
+    # as two identical lines - indistinguishable from the silent overwrite this
+    # whole mechanism exists to prevent.
+    shown = relative[len(layout.ROOT) + 1:]
+    print(f"  {shown:<34} {detection.platform:<6} "
           f"{result.modelled_pct:>5.1f}% modelled")
     return result
 

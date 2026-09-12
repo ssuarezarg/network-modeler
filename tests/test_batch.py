@@ -110,3 +110,20 @@ def test_a_fresh_device_is_not_listed_as_stale():
     fresh = _result("r1", OK, platform="ios", modelled_pct=60.0,
                     accounted_pct=99.0, collected_at=NOW)
     assert not fresh.is_stale
+
+
+def test_colliding_devices_are_distinguishable_in_the_output():
+    """Two colliding devices printed as two identical lines look exactly like
+    the silent overwrite the suffix exists to prevent."""
+    from netconfig_mirror.layout import device_path, find_collisions
+
+    first = CapturedConfig(
+        row_id="r1", device_id="aaaaaaaa1111", command="show running-config",
+        output="x", collected_at=NOW, hostname="Kernel", vendor="cisco_nxos",
+        os_version="9.3", device_type="switch", serial_number="S", role="",
+        location="CLL", collector_id="pureip-dc4")
+    second = CapturedConfig(**{**first.__dict__, "row_id": "r2",
+                               "device_id": "bbbbbbbb2222"})
+
+    collisions = find_collisions([first, second])
+    assert device_path(first, collisions) != device_path(second, collisions)
