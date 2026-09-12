@@ -21,7 +21,7 @@ from pathlib import Path
 
 import yaml
 
-from . import envfile, extract
+from . import envfile, extract, inventory
 from .blocks import ConfigDocument
 from .detect import detect
 from .freshness import DEFAULT_STALE_AFTER
@@ -256,6 +256,23 @@ def cmd_device(args: argparse.Namespace) -> int:
         connection.close()
 
 
+def cmd_inventory(args: argparse.Namespace) -> int:
+    """Survey the estate: platforms, sites, tenants, collisions, bad captures."""
+    connection = extract.connect(args.dsn)
+    try:
+        survey = inventory.survey(connection)
+    finally:
+        connection.close()
+
+    rendered = inventory.render(survey)
+    if args.out_file:
+        Path(args.out_file).write_text(rendered, encoding="utf-8")
+        print(f"wrote {args.out_file}")
+    else:
+        print(rendered)
+    return EXIT_OK
+
+
 def cmd_file(args: argparse.Namespace) -> int:
     key = load_key(args.key_file)
     path = Path(args.config)
@@ -286,6 +303,15 @@ def main(argv: list[str] | None = None) -> int:
                                                "in more than one tenant")
     _common(device)
     device.set_defaults(func=cmd_device)
+
+    survey = sub.add_parser(
+        "inventory", help="survey the estate: platforms, sites, tenants, "
+                          "hostname collisions, captures too small to be configs")
+    survey.add_argument("--dsn", help="libpq connection string (default: PG* env vars)")
+    survey.add_argument("--out-file", help="write the report here instead of stdout")
+    survey.add_argument("--env-file", default=None,
+                        help="settings file to load (default: ./.env if present)")
+    survey.set_defaults(func=cmd_inventory)
 
     from_file = sub.add_parser("file", help="model a configuration file from disk")
     from_file.add_argument("config")
