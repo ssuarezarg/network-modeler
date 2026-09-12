@@ -21,7 +21,8 @@ from pathlib import Path
 
 import yaml
 
-from . import envfile, extract, inventory
+from . import batch as batchlib
+from . import envfile, extract, inventory, layout
 from .blocks import ConfigDocument
 from .detect import detect
 from .freshness import DEFAULT_STALE_AFTER
@@ -37,6 +38,8 @@ EXIT_OK = 0
 EXIT_REDACTION_REFUSED = 2
 EXIT_NO_PARSER = 3
 EXIT_NOT_FOUND = 4
+# Batch completed, but something needs a person to look at it.
+EXIT_BATCH_ATTENTION = 5
 
 
 def load_key(key_file: str | None) -> bytes:
@@ -75,7 +78,7 @@ def build_model(config_text: str, key: bytes, *, hint_platform=None, hint_versio
 
 def write_outputs(out_root: Path, name: str, model: DeviceModel, doc, detection,
                   provenance, redaction, redacted: str, capture=None) -> Path:
-    out_dir = out_root / name
+    out_dir = (out_root / name) if name != "." else out_root
     out_dir.mkdir(parents=True, exist_ok=True)
 
     (out_dir / "device.yaml").write_text(
@@ -256,6 +259,80 @@ def cmd_device(args: argparse.Namespace) -> int:
         connection.close()
 
 
+def cmd_batch(args: argparse.Namespace) -> int:
+    key = load_key(args.key_file)
+    connection = extract.connect(args.dsn)
+    try:
+        captures = extract.fetch(connection, collector_id=args.collector_id)
+    finally:
+        connection.close()
+
+    # Collisions are computed over the WHOLE estate, not over the filtered
+    # subset: a name that clashes must land in the same directory whether the
+    # run covered one site or all of them, or a filtered run would quietly
+    # write to a different path than a full one.
+    collisions = layout.find_collisions(captures)
+
+    selected = [c for c in captures if _matches(c, args)]
+    report = batchlib.BatchReport(skipped_filtered=len(captures) - len(selected))
+
+    for capture in sorted(selected, key=lambda c: (layout.site_of(c), c.device_key)):
+        report.results.append(_model_one(capture, key, args, collisions))
+
+    print(batchlib.render_summary(report))
+    return EXIT_BATCH_ATTENTION if report.needs_attention else EXIT_OK
+
+
+def _matches(capture, args) -> bool:
+    if args.site and layout.site_of(capture) != extract.slugify(args.site):
+        return False
+    if args.vendor and (capture.vendor or "") != args.vendor:
+        return False
+    return True
+
+
+def _model_one(capture, key: bytes, args, collisions) -> "batchlib.DeviceResult":
+    site = layout.site_of(capture)
+    result = batchlib.DeviceResult(
+        hostname=capture.hostname or capture.device_id,
+        site=site,
+        outcome=batchlib.OK,
+        collected_at=capture.collected_at,
+    )
+
+    attempt, detail = batchlib.should_attempt(capture)
+    if not attempt:
+        result.outcome, result.detail = batchlib.TOO_SMALL, detail
+        return result
+
+    try:
+        model, doc, detection, provenance, redaction, redacted = build_model(
+            capture.output, key, hint_platform=args.platform,
+            hint_version=capture.os_version)
+    except RedactionError as error:
+        result.outcome, result.detail = batchlib.REDACTION_REFUSED, str(error)
+        return result
+    except Exception as error:  # noqa: BLE001 - one device must not stop the run
+        result.outcome, result.detail = batchlib.ERROR, f"{type(error).__name__}: {error}"
+        return result
+
+    result.platform = detection.platform
+    if model is None:
+        result.outcome = batchlib.NO_PARSER
+        result.detail = f"platform {detection.platform}"
+        return result
+
+    relative = layout.device_path(capture, collisions)
+    out_dir = write_outputs(Path(args.out) / relative, ".", model, doc, detection,
+                            provenance, redaction, redacted, capture)
+    result.path = relative
+    result.modelled_pct = round(doc.coverage() * 100, 1)
+    result.accounted_pct = round(doc.accounted() * 100, 1)
+    print(f"  {site}/{capture.device_key:<26} {detection.platform:<6} "
+          f"{result.modelled_pct:>5.1f}% modelled")
+    return result
+
+
 def cmd_inventory(args: argparse.Namespace) -> int:
     """Survey the estate: platforms, sites, tenants, collisions, bad captures."""
     connection = extract.connect(args.dsn)
@@ -303,6 +380,14 @@ def main(argv: list[str] | None = None) -> int:
                                                "in more than one tenant")
     _common(device)
     device.set_defaults(func=cmd_device)
+
+    run = sub.add_parser("batch", help="model many devices: all, or one site/vendor")
+    run.add_argument("--site", help="only this location (e.g. DC4, LD5)")
+    run.add_argument("--vendor", help="only this devices.vendor value (e.g. cisco_nxos)")
+    run.add_argument("--dsn", help="libpq connection string (default: PG* env vars)")
+    run.add_argument("--collector-id", help="limit to one tenant")
+    _common(run)
+    run.set_defaults(func=cmd_batch)
 
     survey = sub.add_parser(
         "inventory", help="survey the estate: platforms, sites, tenants, "

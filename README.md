@@ -54,6 +54,29 @@ configuration cannot be replaced by a stale `.env` someone left behind.
 Credentials never go on the command line, where `ps` and shell history would see
 them. `--dsn` is available for one-offs.
 
+Many devices at once:
+
+```bash
+netconfig-mirror batch --out ./out                 # every device
+netconfig-mirror batch --site DC4 --out ./out      # one location
+netconfig-mirror batch --vendor cisco_nxos --out ./out
+```
+
+One device failing never aborts the run. The summary separates the outcomes that
+need different people to act — `redaction refused` is a credential exposure
+upstream, `capture too small` is a collector fault, `no parser` is a known gap —
+and reports mean coverage per platform plus any device that has stopped being
+captured.
+
+Survey the estate before deciding anything:
+
+```bash
+netconfig-mirror inventory
+```
+
+Reports devices by platform, location and tenant, hostname collisions, and
+captures too small to be configurations.
+
 From a file, no database needed:
 
 ```bash
@@ -107,6 +130,7 @@ would look valid.
 | 2 | redaction refused — a credential line came out unredacted |
 | 3 | no parser for the detected platform |
 | 4 | device not found, ambiguous, or never captured |
+| 5 | batch finished, but something needs a person to look at it |
 
 Code 2 is the one to take seriously. Since the viewer sanitises upstream, it
 most likely means **that** sanitiser has a gap — a finding to report there, not
