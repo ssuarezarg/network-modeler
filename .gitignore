@@ -1,7 +1,13 @@
 # --- Project safety rules. These are the reason this file matters. ----------
 #
-# Customer configurations are never committed to this repository, not even as
-# test data. Every test fixture is synthetic - see tests/conftest.py.
+# This repository is the SERVICE PROVIDER'S. The customer's configuration data
+# lives in their own environment, in the mirror repository on their GitLab — it
+# must never reach this one. The rules below are the control that enforces that
+# separation, not housekeeping: relaxing them moves customer data across an
+# organisational boundary.
+#
+# Customer configurations are never committed here, not even as test data.
+# Every test fixture is synthetic - see tests/conftest.py.
 customer_configs/
 *.cfg
 *.txt
