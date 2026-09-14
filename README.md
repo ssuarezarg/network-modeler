@@ -183,6 +183,21 @@ an alert that fires nightly gets muted — which costs you the one that matters.
 Acknowledge a device only after raising it with whoever can fix it; the file is
 a record of "we know", not a place to hide findings.
 
+## Being called by another service
+
+`networkdiscovery-app` triggers a sync by starting a GitLab pipeline, and reads
+results straight from the mirror repository — no bespoke API to deploy or secure.
+A pipeline already provides the job id, status endpoint, serialisation, history,
+logs and failure notification that such an API would have had to reinvent.
+
+See [`docs/CALLING-FROM-AN-APP.md`](docs/CALLING-FROM-AN-APP.md). Pipeline and
+runner configuration are in `docker/gitlab-ci.example.yml` and
+`docker/runner-config.example.toml`.
+
+The split that matters: **trigger a pipeline to refresh, read files to query.**
+A pipeline is a job, not a query — everything the mirror knows is already sitting
+in the repository as files that GitLab serves directly.
+
 ## Exit codes
 
 | Code | Meaning |

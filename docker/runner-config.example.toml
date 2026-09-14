@@ -1,0 +1,56 @@
+# GitLab Runner configuration for the sync job.
+# Goes in /etc/gitlab-runner/config.toml (system runner) after registering.
+#
+# Register with:
+#   sudo gitlab-runner register \
+#     --url https://4.175.164.71:8444/ \
+#     --token <project runner authentication token from GitLab> \
+#     --executor shell \
+#     --description netconfig-mirror \
+#     --tag-list netconfig-mirror
+#
+# The certificate is self-signed, so either add it to the runner's trust store
+# (--tls-ca-file) or register against the private address the runner can reach.
+
+concurrent = 1          # one sync at a time on this host; resource_group also enforces it
+check_interval = 10
+
+[[runners]]
+  name = "netconfig-mirror"
+  url = "https://4.175.164.71:8444/"
+  token = "<runner authentication token>"
+
+  # SHELL executor, deliberately.
+  #
+  # The job's only action is to invoke docker/run.sh, which already mounts the
+  # secrets and runs the container. Using the docker executor instead would put
+  # a container around a command whose job is to start a container, and bring
+  # the usual workspace-ownership problems with it. Shell keeps the secrets as
+  # host files with host permissions, which is where they already are.
+  #
+  # The runner user must be able to run docker and must own (or be able to
+  # write) the mirror checkout, the HMAC key and the SSH push key:
+  #   sudo usermod -aG docker gitlab-runner
+  executor = "shell"
+  shell = "bash"
+
+  environment = [
+    "MIRROR_TOOL_DIR=/home/supportteam/modeler/dt_model",
+    "REPO=/home/supportteam/modeler/mirror",
+    "KEY_FILE=/home/supportteam/.netconfig-mirror.key",
+    "ENV_FILE=/home/supportteam/modeler/dt_model/.env",
+    "SSH_KEY=/home/supportteam/.ssh/mirror-push",
+    "KNOWN_HOSTS=/home/supportteam/.ssh/known_hosts",
+  ]
+
+# WHY THE SECRETS ARE HERE AND NOT IN GITLAB
+#
+# The HMAC key and the database credentials are referenced as host paths in this
+# file, which only a host administrator can edit. As CI/CD variables they would
+# be readable by anyone with Maintainer on the project: "masked" hides a value
+# in the log output, it does not stop a job from printing it.
+#
+# The one credential that IS reasonable as a CI variable is the token used to
+# push to the mirror repository — anyone who can edit the pipeline can push to
+# that repository anyway, so storing it there grants nothing new. Everything
+# else stays on the host.

@@ -1,0 +1,62 @@
+# Pipeline definition for the mirror project. Copy to `.gitlab-ci.yml` in
+# netops/network-mirror (or a dedicated ops project — see NOTE at the end).
+#
+# This exists so that networkdiscovery-app can ask for a sync without anyone
+# writing, deploying or securing a bespoke API. A GitLab pipeline already is a
+# job with an id, a status endpoint, serialisation, history, logs and failure
+# notification; all of that would otherwise have to be built.
+
+stages: [sync]
+
+network-config-sync:
+  stage: sync
+  tags: [netconfig-mirror]          # pins this to the dedicated runner
+
+  # Nothing to check out. The job invokes a wrapper on the host, and the mirror
+  # working tree is a persistent directory there. Cloning would only cost time.
+  variables:
+    GIT_STRATEGY: none
+
+  # THE IMPORTANT LINE. Two syncs running at once would both write the mirror's
+  # working tree and leave the repository inconsistent. `resource_group`
+  # serialises them: a second request waits instead of racing. Without it, the
+  # app triggering twice in quick succession corrupts the repo — and this is the
+  # single hardest problem a hand-written API would have had to solve.
+  resource_group: mirror-sync
+
+  # Never cancel a sync that is already running. The default would kill it
+  # mid-commit when a newer pipeline arrives.
+  interruptible: false
+
+  # Only on an explicit request — a trigger from the app, a schedule, or the
+  # "Run pipeline" button. NOT on push: the sync commits to this very
+  # repository, and reacting to that would start an endless loop.
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "trigger"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "web"
+
+  # $SITE is optional and comes from the trigger call:
+  #   variables[SITE]=DC4  limits the run to one location.
+  script:
+    - cd "$MIRROR_TOOL_DIR"
+    - |
+      if [ -n "${SITE:-}" ]; then
+        docker/run.sh sync --push --site "$SITE" --ack-file docker/acknowledged.txt
+      else
+        docker/run.sh sync --push --ack-file docker/acknowledged.txt
+      fi
+
+  # Exit 5 means the run finished but something needs a person. It has to fail
+  # the pipeline so it is visible — known-bad devices belong in
+  # docker/acknowledged.txt, not here, or the pipeline goes red every night and
+  # people stop looking.
+  timeout: 30m
+
+# NOTE on where this file lives.
+#
+# Simplest is here, in the mirror project. The trade-off is that anyone with
+# Maintainer on this project can edit it, and therefore change how the tool runs
+# against the customer's database. If that matters, put this in a separate ops
+# project with tighter membership and a protected default branch, and point the
+# trigger at that project instead. Nothing else changes.
