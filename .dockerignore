@@ -1,0 +1,28 @@
+# Nothing here should reach the build context, and two entries are load-bearing.
+
+# Secrets. A build context is copied wholesale into the daemon, and anything in
+# a layer is readable by anyone who can pull the image.
+.env
+.env.*
+*.key
+.hmac-key
+
+# Pipeline output: models and redacted configurations. Customer data must not be
+# baked into an image that may travel outside their environment.
+out/
+inventory/
+customer_configs/
+*.cfg
+
+# Not needed at runtime, and it would bust the layer cache on every commit.
+.git
+.gitignore
+tests/
+docs/
+infra/
+docker/
+README.md
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/

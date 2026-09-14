@@ -1,0 +1,16 @@
+# Triggered by OnFailure= when a sync run fails or ends needing attention.
+#
+# Deliberately minimal and deliberately loud. The alerting that matters here is
+# whatever this organisation already reads; wire notify-failure.sh into that
+# rather than inventing a channel nobody watches.
+
+[Unit]
+Description=netconfig-mirror run failed
+
+[Service]
+Type=oneshot
+User=supportteam
+# The unit name is passed explicitly: systemd does not hand it to an
+# OnFailure= target, and without it the script cannot read the exit code
+# that says WHICH failure this was.
+ExecStart=/home/supportteam/modeler/dt_model/docker/notify-failure.sh netconfig-mirror.service

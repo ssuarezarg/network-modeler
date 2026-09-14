@@ -1,0 +1,40 @@
+# One sync run. Driven by netconfig-mirror.timer; not enabled on its own.
+#
+# Install with:
+#   sudo cp docker/netconfig-mirror*.service docker/netconfig-mirror.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now netconfig-mirror.timer
+#
+# Adjust User= and the paths below to match the account that owns the mirror
+# checkout, the HMAC key and the SSH key.
+
+[Unit]
+Description=netconfig-mirror: model the network and commit what changed
+Documentation=https://bitbucket.org/bcmonenc/dt_model
+After=docker.service network-online.target
+Requires=docker.service
+OnFailure=netconfig-mirror-failure.service
+
+[Service]
+Type=oneshot
+User=supportteam
+Group=supportteam
+WorkingDirectory=/home/supportteam/modeler/dt_model
+
+Environment=REPO=/home/supportteam/modeler/mirror
+Environment=KEY_FILE=/home/supportteam/.netconfig-mirror.key
+Environment=ENV_FILE=/home/supportteam/modeler/dt_model/.env
+Environment=SSH_KEY=/home/supportteam/.ssh/mirror-push
+Environment=KNOWN_HOSTS=/home/supportteam/.ssh/known_hosts
+
+ExecStart=/home/supportteam/modeler/dt_model/docker/run.sh sync --push \
+          --ack-file /home/supportteam/modeler/dt_model/docker/acknowledged.txt
+
+# The full estate is 73 devices and a few seconds of parsing each; this is a
+# ceiling against a hung database connection, not an expected duration.
+TimeoutStartSec=30min
+
+# Exit 5 means "finished, but something needs a person". It is a real outcome,
+# not a crash - but it must still reach OnFailure, which is why it is NOT listed
+# as a success status. Known-bad devices belong in the acknowledgement file
+# instead, so this stays quiet until something new breaks.

@@ -138,6 +138,51 @@ is chosen from evidence.
 An unsupported platform is reported rather than producing an empty model that
 would look valid.
 
+## Running it in a container
+
+```bash
+docker build -t netconfig-mirror:0.1.0 .
+docker/run.sh inventory
+docker/run.sh sync --push
+```
+
+The image holds the installed tool and no source, no configuration and no
+secrets. The HMAC key, the database settings and the SSH key used to push are
+mounted at run time by `docker/run.sh`, which validates every path first —
+bind-mounting a path that does not exist makes Docker create an empty directory
+there, and the failure then surfaces as a confusing error about the wrong thing.
+
+Database credentials are mounted as a file and read by the tool's own
+`--env-file`, not passed with Docker's: Docker's copies them into the container
+environment, where `docker inspect` shows them.
+
+Because the build stage is separate, moving to shipping a prebuilt image later
+changes only where `docker build` runs — the artefact is the same.
+
+## Scheduling
+
+```bash
+sudo cp docker/netconfig-mirror*.service docker/netconfig-mirror.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now netconfig-mirror.timer
+systemctl list-timers netconfig-mirror.timer
+```
+
+A failed run triggers `netconfig-mirror-failure.service`, which logs to the
+journal and mails if `ALERT_EMAIL` is set. Point `notify-failure.sh` at whatever
+this organisation actually reads.
+
+### Acknowledging known failures
+
+Copy `docker/acknowledged.example` to `docker/acknowledged.txt` and list
+hostnames whose failure is already known and being handled upstream. They stay
+in every summary but stop setting the attention exit code.
+
+Without this the scheduled run alerts every night for the same two devices, and
+an alert that fires nightly gets muted — which costs you the one that matters.
+Acknowledge a device only after raising it with whoever can fix it; the file is
+a record of "we know", not a place to hide findings.
+
 ## Exit codes
 
 | Code | Meaning |

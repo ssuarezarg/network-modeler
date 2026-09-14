@@ -1,0 +1,18 @@
+[Unit]
+Description=Run netconfig-mirror daily
+
+[Timer]
+# After the collector's own nightly runs - the captures in this estate land
+# around 02:00-02:10 UTC, so this reads a fresh snapshot rather than yesterday's.
+OnCalendar=*-*-* 04:30:00 UTC
+
+# Spread the start so the VM is not hit by every timer at once. It shares memory
+# with NetBox and GitLab.
+RandomizedDelaySec=15min
+
+# If the VM was down at 04:30, run once on the next boot instead of skipping a
+# day. A missed day is a hole in the history, and the history is the product.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

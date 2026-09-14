@@ -59,6 +59,9 @@ class DeviceResult:
 class BatchReport:
     results: list[DeviceResult] = field(default_factory=list)
     skipped_filtered: int = 0
+    # Devices whose problem is already known and accepted upstream. They still
+    # appear in the summary; they just stop claiming someone's attention.
+    acknowledged: set[str] = field(default_factory=set)
 
     def counts(self) -> dict[str, int]:
         counts: dict[str, int] = {}
@@ -68,15 +71,27 @@ class BatchReport:
 
     @property
     def needs_attention(self) -> bool:
-        """Anything a person has to look at.
+        """Anything a person has to look at, that they have not already seen.
 
-        `NO_PARSER` is excluded on purpose: Firepower and IOS-XR are known and
-        accepted gaps, and failing every nightly run over them would train
-        people to ignore the exit code - which is the one thing it must not do.
+        Two exclusions, both there to keep the signal worth reacting to:
+
+        `NO_PARSER` never counts. Firepower is a known and accepted gap, and
+        failing every nightly run over 24 devices would train people to ignore
+        the exit code - the one thing it must not do.
+
+        Acknowledged devices do not count either. Two devices in this estate
+        store 65-byte error strings instead of configurations, every single
+        night; that is a real finding, but once it has been raised with whoever
+        owns the collector, repeating it daily is noise. Acknowledging them
+        keeps the alert meaning "something NEW is wrong" - and a device that
+        starts failing differently still trips it, because the acknowledgement
+        is per device, not blanket.
         """
-        counts = self.counts()
-        return any(counts.get(outcome) for outcome in
-                   (REDACTION_REFUSED, ERROR, TOO_SMALL))
+        for result in self.results:
+            if result.outcome in (REDACTION_REFUSED, ERROR, TOO_SMALL):
+                if result.hostname not in self.acknowledged:
+                    return True
+        return False
 
     def coverage_by_platform(self) -> dict[str, tuple[int, float, float]]:
         grouped: dict[str, list[DeviceResult]] = {}
@@ -141,7 +156,8 @@ def render_summary(report: BatchReport) -> str:
         if affected:
             lines += ["", f"{outcome}:"]
             for result in affected:
-                lines.append(f"  {result.hostname:<24} {result.detail or ''}")
+                mark = "  (acknowledged)" if result.hostname in report.acknowledged else ""
+                lines.append(f"  {result.hostname:<24} {result.detail or ''}{mark}")
 
     if counts.get(REDACTION_REFUSED):
         lines += ["",
@@ -151,3 +167,24 @@ def render_summary(report: BatchReport) -> str:
 
     lines.append("=" * 66)
     return "\n".join(lines)
+
+
+def load_acknowledged(path) -> set[str]:
+    """Hostnames whose failure is already known, one per line.
+
+    Comments and blanks are ignored. A missing file is not an error: the default
+    is to acknowledge nothing, which is the safe direction - an unreadable
+    suppression list must never silently suppress.
+    """
+    from pathlib import Path
+
+    target = Path(path)
+    if not target.is_file():
+        return set()
+
+    names = set()
+    for raw in target.read_text(encoding="utf-8").splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if line:
+            names.add(line)
+    return names

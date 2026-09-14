@@ -1,0 +1,14 @@
+# Hostnames whose failure is already known and accepted. They still appear in
+# every run's summary; they simply stop setting the "needs attention" exit code,
+# so a scheduled run stays silent until something NEW goes wrong.
+#
+# Acknowledge a device only after the problem has been raised with whoever can
+# fix it. This file is a record of "we know, it is being handled" — not a place
+# to hide findings.
+#
+# Copy to acknowledged.txt and edit.
+
+# Store 65-byte error strings instead of configurations. The collector reports
+# these as successfully collected. Raised with the collector team 2026-09-12.
+UK-LD5-R316-RTR1
+UK-LD5-R316-RTR2

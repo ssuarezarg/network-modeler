@@ -281,7 +281,9 @@ def cmd_batch(args: argparse.Namespace) -> int:
     collisions = layout.find_collisions(captures)
 
     selected = [c for c in captures if _matches(c, args)]
-    report = batchlib.BatchReport(skipped_filtered=len(captures) - len(selected))
+    report = batchlib.BatchReport(
+        skipped_filtered=len(captures) - len(selected),
+        acknowledged=batchlib.load_acknowledged(args.ack_file) if args.ack_file else set())
 
     for capture in sorted(selected, key=lambda c: (layout.site_of(c), c.device_key)):
         report.results.append(_model_one(capture, key, args, collisions))
@@ -369,7 +371,9 @@ def cmd_sync(args: argparse.Namespace) -> int:
     repo.ensure_readme()
     existing = repo.existing_devices()
     sync = gitops.SyncReport()
-    report = batchlib.BatchReport(skipped_filtered=len(captures) - len(selected))
+    report = batchlib.BatchReport(
+        skipped_filtered=len(captures) - len(selected),
+        acknowledged=batchlib.load_acknowledged(args.ack_file) if args.ack_file else set())
     keep: set[str] = set()
 
     for capture in sorted(selected, key=lambda c: (layout.site_of(c), c.device_key)):
@@ -500,6 +504,9 @@ def _common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--platform", help="override platform detection")
     parser.add_argument("--show-unmodelled", type=int, default=15,
                         help="how many unrecognised command prefixes to list")
+    parser.add_argument("--ack-file", default=None,
+                        help="file of hostnames whose failure is already known and "
+                             "accepted; they no longer set the attention exit code")
     parser.add_argument("--env-file", default=None,
                         help="settings file to load (default: ./.env if present). "
                              "Real environment variables always win over it.")

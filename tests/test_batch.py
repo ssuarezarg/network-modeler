@@ -127,3 +127,45 @@ def test_colliding_devices_are_distinguishable_in_the_output():
 
     collisions = find_collisions([first, second])
     assert device_path(first, collisions) != device_path(second, collisions)
+
+
+def test_an_acknowledged_device_does_not_demand_attention():
+    """Two devices in this estate store 65-byte error strings every single
+    night. Once raised with whoever owns the collector, repeating it daily is
+    noise — and an alert that fires every night gets muted."""
+    report = BatchReport(
+        results=[_result("UK-LD5-R316-RTR1", TOO_SMALL, detail="65 bytes")],
+        acknowledged={"UK-LD5-R316-RTR1"})
+    assert not report.needs_attention
+
+
+def test_acknowledging_one_device_does_not_silence_another():
+    """The acknowledgement is per device, so a new failure still trips it."""
+    report = BatchReport(
+        results=[_result("UK-LD5-R316-RTR1", TOO_SMALL),
+                 _result("dc4-edge-r1", REDACTION_REFUSED)],
+        acknowledged={"UK-LD5-R316-RTR1"})
+    assert report.needs_attention
+
+
+def test_acknowledged_devices_are_still_reported():
+    """Suppressed from the exit code, not from the output."""
+    report = BatchReport(results=[_result("rtr1", TOO_SMALL, detail="65 bytes")],
+                         acknowledged={"rtr1"})
+    out = render_summary(report)
+    assert "rtr1" in out and "acknowledged" in out
+
+
+def test_a_missing_acknowledgement_file_acknowledges_nothing(tmp_path):
+    """An unreadable suppression list must never silently suppress."""
+    from netconfig_mirror.batch import load_acknowledged
+
+    assert load_acknowledged(tmp_path / "absent.txt") == set()
+
+
+def test_acknowledgement_file_ignores_comments_and_blanks(tmp_path):
+    from netconfig_mirror.batch import load_acknowledged
+
+    path = tmp_path / "ack.txt"
+    path.write_text("# known bad, raised 2026-09-12\n\nUK-LD5-R316-RTR1\nrtr2  # ditto\n")
+    assert load_acknowledged(path) == {"UK-LD5-R316-RTR1", "rtr2"}
