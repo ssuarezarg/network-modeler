@@ -25,11 +25,19 @@ RUN python -m venv /opt/venv \
 
 FROM python:3.12-slim
 
-# git and ssh are the tool's actual runtime dependencies for the sync stage: it
-# shells out to git, and pushes over SSH.
-RUN apt-get update \
- && apt-get install -y --no-install-recommends git openssh-client ca-certificates \
- && rm -rf /var/lib/apt/lists/*
+# Fetch packages over HTTPS. The Debian images default to http://deb.debian.org,
+# and the host this is built on has no outbound port 80 - the base image and pip
+# both arrive over 443, so apt is the only thing that fails. Rewriting the
+# sources costs nothing and removes a dependency on a port nobody needs open.
+# Both file layouts are handled: trixie uses the deb822 .sources format, older
+# releases a plain sources.list.
+RUN set -eux; \
+    for f in /etc/apt/sources.list.d/debian.sources /etc/apt/sources.list; do \
+      [ -f "$f" ] && sed -i 's|http://deb.debian.org|https://deb.debian.org|g' "$f" || true; \
+    done; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends git openssh-client ca-certificates; \
+    rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH" \
@@ -37,12 +45,10 @@ ENV PATH="/opt/venv/bin:$PATH" \
 
 # The mirror repository arrives as a bind mount owned by a host user, and git
 # refuses to operate on a repository owned by someone else ("dubious
-# ownership"). Set through GIT_CONFIG_* rather than a user's .gitconfig so it
+# ownership"). Written to the system-wide gitconfig rather than a user's, so it
 # applies whatever UID the container is told to run as - including the host UID
 # passed with `--user`, which is how the bind mounts stay writable.
-ENV GIT_CONFIG_COUNT=1 \
-    GIT_CONFIG_KEY_0=safe.directory \
-    GIT_CONFIG_VALUE_0=*
+RUN git config --system --add safe.directory '*'
 
 # A default non-root identity. `docker run --user "$(id -u):$(id -g)"` overrides
 # it so that files written into the mounted repository belong to the host user
