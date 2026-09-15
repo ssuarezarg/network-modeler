@@ -46,6 +46,15 @@ DEFAULT_VOLATILE = (
     "metadata.lastUser",
     "links.self",
     "paging",
+    # Measured, not assumed: comparing two captures of a real Firepower a day
+    # apart, this was the only field that moved across all five endpoints.
+    #
+    # It is not noise — it says whether FMC holds changes that have not been
+    # deployed, which is genuine drift between intent and what the device runs.
+    # But it is operational state rather than configuration, so it belongs in a
+    # report like staleness does, not in the content whose diff is the product.
+    # Left in, it would commit a firewall every time someone staged a change.
+    "deploymentStatus",
 )
 
 

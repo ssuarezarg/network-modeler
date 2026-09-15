@@ -88,3 +88,21 @@ def test_stripping_removes_only_the_named_paths():
 def test_a_capture_that_is_not_json_is_recognised():
     assert jsondoc.parse("hostname R1\ninterface Gi0/0\n") is None
     assert jsondoc.parse('{"a": 1}') == {"a": 1}
+
+
+def test_deployment_status_is_stripped_from_content():
+    """Measured from two real captures a day apart: the only field that moved.
+    Real information — FMC holding undeployed changes — but operational state,
+    so it belongs in a report rather than in the content whose diff is the
+    product."""
+    obj = jsondoc.strip_volatile({"name": "DC4_FW1", "deploymentStatus": "DEPLOYED"})
+    assert obj == {"name": "DC4_FW1"}
+
+
+def test_the_volatile_list_is_applied_before_comparison():
+    """Otherwise the discovery command reports the fields it already knows
+    about, and buries the ones it does not."""
+    first = {"deploymentStatus": "DEPLOYED", "rules": []}
+    second = {"deploymentStatus": "PENDING", "rules": []}
+    assert jsondoc.find_volatile(jsondoc.strip_volatile(first),
+                                 jsondoc.strip_volatile(second)) == []
