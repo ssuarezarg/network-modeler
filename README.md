@@ -1,10 +1,58 @@
 # netconfig-mirror
 
-Turns router configurations stored in the collector's Postgres database into a
-structured, schema-validated YAML model.
+Turns the running configuration of every device in a collector database into a
+structured model, and keeps it in Git so that **every change to the network
+becomes a reviewable commit**.
 
-Design and rationale: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+One direction only: `database → Git`. Nothing here writes to a device.
+
+## What it is for
+
+A collector captures configurations nightly and stores them in Postgres. That
+answers "what does this device look like now" and nothing else: there is no
+history, no diff, and no way to tell a device that stopped being collected from
+one that simply has not changed.
+
+This turns those captures into a repository where the diff is the product.
+`git log -p -- inventory/<site>/<device>/` shows every change to one device over
+time, and `git show <sha>` shows the network as it was that day.
+
+## How it works
+
+```
+ database ──▶ normalise ──▶ redact ──▶ detect ──▶ parse ──▶ commit ──▶ Git
+              strip         fail       platform   model     only what
+              volatile      closed     + version            changed
+```
+
+Each stage exists because of a specific way this goes wrong:
+
+**Normalise** removes lines that move on their own — capture timestamps, byte
+counts, checksums. Left in, every sync commits every device nightly and the real
+changes drown. A mirror that always shows changes is worth the same as one that
+never does.
+
+**Redact** replaces credentials with keyed tokens, and **fails closed**: a
+credential line that no rule recognises stops that device rather than being
+published. An unknown credential format must break the pipeline, never slip
+through it.
+
+**Detect** dispatches on `(platform, version)` using weighted markers rather
+than first-match-wins, so a close call is reported as low confidence instead of
+being resolved silently. IOS-XE 15.x is indistinguishable from classic IOS by
+version number alone.
+
+**Parse** produces the model. It reports how much of the configuration it
+accounted for, so an incomplete parser is a visible gap rather than a
+convincing-looking model.
+
+**Commit** writes only what changed. A network that did not change produces no
+commit — that silence is the point.
+
+Design and rationale in full: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 GitLab deployment: [`infra/gitlab/README.md`](infra/gitlab/README.md).
+Being driven by another service:
+[`docs/CALLING-FROM-AN-APP.md`](docs/CALLING-FROM-AN-APP.md).
 
 ## Install
 
@@ -147,7 +195,7 @@ fail-closed check at all.
 
 ```bash
 netconfig-mirror audit --repo ./mirror
-netconfig-mirror compare dc4-edge-r1 dc4-edge-r2 --repo ./mirror
+netconfig-mirror compare CORE-RTR-01 CORE-RTR-02 --repo ./mirror
 ```
 
 `audit` looks for routing policy that cannot do what it appears to do:
@@ -274,3 +322,22 @@ in the repository as files that GitLab serves directly.
 Code 2 is the one to take seriously. Since the viewer sanitises upstream, it
 most likely means **that** sanitiser has a gap — a finding to report there, not
 only to patch here.
+
+## What it deliberately does not do
+
+**Write to devices.** Read-only, always.
+
+**Detect credential rotation**, when the source is a sanitised database. If
+every secret arrives already replaced by one constant literal, a rotated
+password produces no diff — the signal is absent from the source and cannot be
+recovered downstream. Against an unsanitised source the HMAC tokens do show
+rotation.
+
+**Model every platform.** Firepower arrives as REST endpoints rather than a
+configuration and is mirrored, not modelled. An unsupported platform is reported
+as such rather than yielding an empty model that would look valid.
+
+**Alert about problems already known.** Devices listed in the acknowledgement
+file stay in every summary and stop setting the attention exit code, so a
+scheduled run is quiet until something *new* goes wrong. An alert that fires
+every night gets muted, and then it costs you the one that matters.
