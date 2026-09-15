@@ -107,6 +107,18 @@ Each run writes `out/<hostname>/`:
 | `raw.cfg` | the redacted configuration, verbatim |
 | `meta.yaml` | provenance, coverage figures, redaction counts |
 
+## What the model covers
+
+Device identity, interfaces, VRFs, VLANs, static routes, BGP (including
+neighbours inside VRF address-families), OSPF, access-lists, **prefix-lists and
+route-maps**, and management services. NX-OS adds the `feature` set, the VXLAN
+NVE interface and the VLAN-to-VNI mapping.
+
+Prefix-lists record `referenced_by`: the route-maps that match them. It is
+computed, not parsed, and it is the reason modelling them earns its place — a
+prefix-list nothing references announces nothing, however many entries it holds.
+On one real router, nine of thirty were in exactly that state.
+
 ## Reading the coverage output
 
 ```

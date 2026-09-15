@@ -21,6 +21,7 @@ from __future__ import annotations
 import re
 
 from ..blocks import Block, ConfigDocument
+from . import common
 from ..model import (
     AccessList,
     Bgp,
@@ -44,7 +45,7 @@ _ACKNOWLEDGED = re.compile(
     r"|ip\s+domain-lookup\b|ip\s+domain-name\b|ip\s+name-server\b|ip\s+pim\b"
     r"|ip\s+dhcp\b|ipv6\s+dhcp\b"
     r"|ipv6\b|ip\s+igmp\b|ip\s+tftp\b|ip\s+http\b|service\b|event\b|scheduler\b"
-    r"|fabric\b|nv\s+overlay\b|evpn\b|route-map\b|ip\s+prefix-list\b"
+    r"|fabric\b|nv\s+overlay\b|evpn\b"
     r"|ip\s+community-list\b|ip\s+as-path\b|class-map\b|policy-map\b|table-map\b"
     r"|control-plane\b|spanning-tree\b|port-channel\b|errdisable\b|lacp\b"
     r"|vpc\b|track\b|object-group\b|key\b|aaa\b|tacacs\b|radius\b|license\b"
@@ -75,6 +76,9 @@ def parse(config_text: str, *, platform: str | None = None,
     model.bgp = _bgp(doc)
     model.ospf = _ospf(doc)
     model.access_lists = _access_lists(doc)
+    model.prefix_lists = common.parse_prefix_lists(doc)
+    model.route_maps = common.parse_route_maps(doc)
+    common.link_references(model.prefix_lists, model.route_maps)
     model.services = _services(doc)
 
     for block in doc.blocks:

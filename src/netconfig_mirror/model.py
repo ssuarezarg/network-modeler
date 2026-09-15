@@ -96,6 +96,43 @@ class AccessList:
 
 
 @dataclass
+class PrefixListEntry:
+    action: str                  # permit | deny
+    prefix: str
+    seq: str | None = None
+    ge: str | None = None
+    le: str | None = None
+
+
+@dataclass
+class PrefixList:
+    name: str
+    entry_count: int = 0
+    entries: list[PrefixListEntry] = field(default_factory=list)
+    # Route-maps that match this list. Computed rather than parsed, and the
+    # reason this is modelled at all: a prefix-list nothing references announces
+    # nothing. An empty list here means the entries are inert - staged, or left
+    # behind by a change that was never finished.
+    referenced_by: list[str] = field(default_factory=list)
+
+
+@dataclass
+class RouteMapClause:
+    seq: str
+    action: str                  # permit | deny
+    match: list[str] = field(default_factory=list)
+    set: list[str] = field(default_factory=list)
+
+
+@dataclass
+class RouteMap:
+    name: str
+    clauses: list[RouteMapClause] = field(default_factory=list)
+    # Prefix-lists this route-map matches on, flattened for readability.
+    prefix_lists: list[str] = field(default_factory=list)
+
+
+@dataclass
 class Vlan:
     id: str
     name: str | None = None
@@ -152,6 +189,8 @@ class DeviceModel:
     features: list[str] = field(default_factory=list)
     nve: NveInterface | None = None
     access_lists: list[AccessList] = field(default_factory=list)
+    prefix_lists: list[PrefixList] = field(default_factory=list)
+    route_maps: list[RouteMap] = field(default_factory=list)
     services: Services = field(default_factory=Services)
 
     def to_dict(self) -> dict:

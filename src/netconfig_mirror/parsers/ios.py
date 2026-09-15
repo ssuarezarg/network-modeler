@@ -14,6 +14,7 @@ from __future__ import annotations
 import re
 
 from ..blocks import Block, ConfigDocument
+from . import common
 from ..model import (
     AccessList,
     Bgp,
@@ -48,9 +49,9 @@ _ACKNOWLEDGED = re.compile(
     # ip-prefixed globals that are not addressing.
     r"|ip\s+(?:subnet-zero|source-route|classless|cef|domain[-\s]lookup|ssh"
     r"|forward-protocol|http|ftp|bootp|finger|tcp|icmp|routing|scp|tftp|tacacs"
-    r"|bgp-community|prefix-list|community-list|as-path|sla)\b"
+    r"|bgp-community|community-list|as-path|sla)\b"
     # Policy constructs referenced by the model but not modelled themselves.
-    r"|class-map\b|policy-map\b|table-map\b|route-map\b|object-group\b"
+    r"|class-map\b|policy-map\b|table-map\b|object-group\b"
     # Management. The modelled parts (snmp-server community/user/host, ntp
     # server, logging host, aaa, username) are consumed before this runs; what
     # is left here is the remainder - snmp-server view/group/location, aaa
@@ -78,6 +79,9 @@ def parse(config_text: str, *, platform: str | None = None,
     model.bgp = _bgp(doc)
     model.ospf = _ospf(doc)
     model.access_lists = _access_lists(doc)
+    model.prefix_lists = common.parse_prefix_lists(doc)
+    model.route_maps = common.parse_route_maps(doc)
+    common.link_references(model.prefix_lists, model.route_maps)
     model.services = _services(doc)
 
     _acknowledge_remainder(doc)
