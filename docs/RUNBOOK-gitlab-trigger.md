@@ -34,6 +34,37 @@ sudo usermod -aG docker supportteam
 sudo systemctl restart gitlab-runner
 ```
 
+### Clear `~/.bash_logout` for that user
+
+The shell executor runs the job through `su ... bash -l`, and Ubuntu's default
+`~/.bash_logout` ends with:
+
+```bash
+if [ "$SHLVL" = 1 ]; then
+    [ -x /usr/bin/clear_console ] && /usr/bin/clear_console -q
+fi
+```
+
+`clear_console` fails without a TTY, and being the last command in the file it
+becomes the login shell's exit status. The runner reports that as
+`prepare environment: exit status 1` — a message that points at the environment
+and says nothing about a logout script.
+
+It also hides from the obvious test: `sudo -u supportteam bash --login -c 'echo
+ok'` exits 0, because `SHLVL` is not 1 there and the block never runs. Only the
+runner's own `su` reproduces it.
+
+```bash
+cp ~/.bash_logout ~/.bash_logout.bak 2>/dev/null || true
+echo 'true' >> ~/.bash_logout        # guarantees a zero exit, changes nothing else
+```
+
+Reproduce what the runner actually does, before and after:
+
+```bash
+sudo su -s /bin/bash supportteam -c 'bash -l -c "echo ok"'; echo "exit=$?"
+```
+
 **Check 1**
 
 ```bash
