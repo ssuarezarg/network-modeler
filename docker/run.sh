@@ -29,6 +29,11 @@ KEY_FILE="${KEY_FILE:-$HOME/.netconfig-mirror.key}"
 ENV_FILE="${ENV_FILE:-$HOME/modeler/dt_model/.env}"
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/mirror-push}"
 KNOWN_HOSTS="${KNOWN_HOSTS:-$HOME/.ssh/known_hosts}"
+# Optional. Devices whose failure is already known and raised; see
+# docker/acknowledged.example. Mounted rather than passed as a path, because a
+# host path handed to --ack-file does not exist inside the container - the file
+# is then silently absent and every known-bad device demands attention again.
+ACK_FILE="${ACK_FILE:-$(dirname "$0")/acknowledged.txt}"
 
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
@@ -55,6 +60,14 @@ case "$SUBCOMMAND" in
   *)         EXTRA=() ;;
 esac
 
+ACK_MOUNT=""
+if [[ -f "$ACK_FILE" ]]; then
+  ACK_MOUNT="-v $ACK_FILE:/secrets/acknowledged.txt:ro"
+  case "$SUBCOMMAND" in
+    sync|batch) EXTRA+=(--ack-file /secrets/acknowledged.txt) ;;
+  esac
+fi
+
 # --network host so the container reaches the database VM and GitLab exactly as
 # the host does, without publishing anything or duplicating network config.
 exec docker run --rm \
@@ -69,6 +82,7 @@ exec docker run --rm \
   -v "$SSH_KEY:/secrets/ssh_key:ro" \
   -v "$KNOWN_HOSTS:/secrets/known_hosts:ro" \
   -v /etc/passwd:/etc/passwd:ro \
+  ${ACK_MOUNT} \
   -e HOME=/tmp \
   -e GIT_SSH_COMMAND="ssh -i /secrets/ssh_key -o IdentitiesOnly=yes -o UserKnownHostsFile=/secrets/known_hosts" \
   -e GIT_AUTHOR_NAME=netconfig-mirror \

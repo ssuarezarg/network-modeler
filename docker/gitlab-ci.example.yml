@@ -38,13 +38,18 @@ network-config-sync:
 
   # $SITE is optional and comes from the trigger call:
   #   variables[SITE]=DC4  limits the run to one location.
+  #
+  # The acknowledgement file is not named here: run.sh mounts it into the
+  # container and passes the container-side path. Handing --ack-file a host
+  # path would leave the file silently absent inside the container, and every
+  # already-known failure would demand attention again.
   script:
     - cd "$MIRROR_TOOL_DIR"
     - |
       if [ -n "${SITE:-}" ]; then
-        docker/run.sh sync --push --site "$SITE" --ack-file docker/acknowledged.txt
+        docker/run.sh sync --push --site "$SITE"
       else
-        docker/run.sh sync --push --ack-file docker/acknowledged.txt
+        docker/run.sh sync --push
       fi
 
   # Exit 5 means the run finished but something needs a person. It has to fail
