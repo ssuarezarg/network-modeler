@@ -10,6 +10,13 @@
 # /proc show them; the database settings are instead mounted as a file and read
 # by the tool's own --env-file, so the credentials never become env vars at all.
 #
+# /etc/passwd is mounted read-only because the container runs as the host's UID,
+# which has no entry in the image. OpenSSH calls getpwuid() and refuses to start
+# when it cannot resolve the user it is running as - "No user exists for uid
+# 1000" - so the push fails even though everything else works. HOME is set to
+# the tmpfs for the same reason: the home directory named in that passwd entry
+# does not exist inside the container.
+#
 # Paths are validated before docker runs. Bind-mounting a path that does not
 # exist makes Docker create an empty DIRECTORY there, and the failure surfaces
 # later as "IsADirectoryError" on what should have been the key file - an error
@@ -57,6 +64,8 @@ exec docker run --rm \
   -v "$ENV_FILE:/secrets/db.env:ro" \
   -v "$SSH_KEY:/secrets/ssh_key:ro" \
   -v "$KNOWN_HOSTS:/secrets/known_hosts:ro" \
+  -v /etc/passwd:/etc/passwd:ro \
+  -e HOME=/tmp \
   -e GIT_SSH_COMMAND="ssh -i /secrets/ssh_key -o IdentitiesOnly=yes -o UserKnownHostsFile=/secrets/known_hosts" \
   -e GIT_AUTHOR_NAME=netconfig-mirror \
   -e GIT_AUTHOR_EMAIL=netconfig-mirror@local \

@@ -216,6 +216,21 @@ class MirrorRepo:
         self._git(*args)
         return self._git("rev-parse", "--short", "HEAD").strip()
 
+    def push_needed(self, remote: str = "origin", branch: str | None = None) -> bool:
+        """Whether the local branch holds commits the remote does not.
+
+        Asked instead of assuming, so that a push which failed on an earlier run
+        is retried on the next one rather than being stranded.
+        """
+        branch = branch or self._git("rev-parse", "--abbrev-ref", "HEAD").strip()
+        # An unknown remote branch means there is certainly something to send.
+        try:
+            self._git("rev-parse", "--verify", f"{remote}/{branch}")
+        except GitError:
+            return True
+        ahead = self._git("rev-list", "--count", f"{remote}/{branch}..{branch}").strip()
+        return ahead not in ("", "0")
+
     def push(self, remote: str = "origin", branch: str | None = None) -> None:
         branch = branch or self._git("rev-parse", "--abbrev-ref", "HEAD").strip()
         self._git("push", remote, branch)

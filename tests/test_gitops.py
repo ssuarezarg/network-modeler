@@ -163,3 +163,30 @@ def test_commit_message_says_what_happened():
 
 def test_commit_message_when_nothing_moved():
     assert build_message(SyncReport()).startswith("sync: no device changes")
+
+
+def test_push_needed_is_true_when_the_remote_branch_is_unknown(repo):
+    """A repository with no remote tracking branch certainly has work to send."""
+    assert repo.push_needed()
+
+
+def test_push_needed_tracks_commits_the_remote_does_not_have(tmp_path, repo):
+    """The bug this guards: pushing only when *this run* committed strands a
+    commit whose push failed. The next run finds nothing new to commit, never
+    retries the push, and the remote silently stops advancing while every run
+    reports success."""
+    bare = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "--bare", "-q", str(bare)], check=True)
+    _git(repo.path, "remote", "add", "origin", str(bare))
+    _git(repo.path, "push", "-q", "origin", "main")
+    _git(repo.path, "fetch", "-q", "origin")
+
+    assert not repo.push_needed()
+
+    _write(repo)
+    repo.commit("a change")
+    assert repo.push_needed()
+
+    repo.push()
+    _git(repo.path, "fetch", "-q", "origin")
+    assert not repo.push_needed()

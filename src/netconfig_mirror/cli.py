@@ -411,14 +411,29 @@ def cmd_sync(args: argparse.Namespace) -> int:
     if commit:
         print(f"\ncommitted {commit}: {len(sync.changed)} changed, "
               f"{len(sync.renamed)} renamed, {len(sync.removed)} removed")
-        if args.push:
-            repo.push()
-            sync.pushed = True
-            print("pushed")
     else:
         # The normal outcome on a network that did not change, and the point of
         # the whole exercise: silence means nothing moved.
         print("\nnothing changed; no commit")
+
+    # Pushing is driven by "is the local branch ahead", not by "did this run
+    # commit". A push that failed once would otherwise strand its commit
+    # forever: the next run finds nothing new to commit, so it would never try
+    # to push again, and the remote mirror silently stops advancing while every
+    # run reports success.
+    if args.push:
+        try:
+            if repo.push_needed():
+                repo.push()
+                sync.pushed = True
+                print("pushed")
+            else:
+                print("remote already up to date")
+        except gitops.GitError as error:
+            print(f"\nCOMMITTED LOCALLY BUT NOT PUSHED: {error}", file=sys.stderr)
+            print(f"The work is safe in {args.repo}; re-run once the remote is "
+                  f"reachable, or push by hand.", file=sys.stderr)
+            return EXIT_REPO
 
     return EXIT_BATCH_ATTENTION if report.needs_attention else EXIT_OK
 
