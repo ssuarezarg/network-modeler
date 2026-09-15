@@ -44,7 +44,30 @@ effect — log out and back in, or reboot.
 
 ## 2. Register it against GitLab
 
-The certificate is self-signed, so the runner must be told to trust it
+**Check which address the runner can actually reach first.** The runner is on
+the same VM as GitLab, and a VM behind Azure's NAT usually cannot reach its own
+public address:
+
+```bash
+curl -sk -o /dev/null -w 'public:  %{http_code}\n' --max-time 5 https://<public>:8444/
+curl -sk -o /dev/null -w 'private: %{http_code}\n' --max-time 5 https://<private>:8444/
+```
+
+A `000` means no connection at all. Register against whichever answers — and if
+that is the private address while the certificate names only the public one,
+reissue it covering both before going further:
+
+```bash
+sudo SSL_DIR=/srv/gitlab/ssl scripts/bootstrap-selfsigned.sh <public> <private>
+docker exec gitlab gitlab-ctl restart nginx
+```
+
+The first name stays the CN and the filename, so it must still match
+`GITLAB_FQDN`; the others are added as SANs. `external_url` does not change —
+people keep reaching it by the public address, and only the runner uses the
+private one.
+
+The certificate is self-signed, so the runner must also be told to trust it
 explicitly. Without `--tls-ca-file` registration fails with a TLS error that
 reads like a network problem.
 
