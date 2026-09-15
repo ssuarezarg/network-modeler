@@ -119,6 +119,30 @@ computed, not parsed, and it is the reason modelling them earns its place — a
 prefix-list nothing references announces nothing, however many entries it holds.
 On one real router, nine of thirty were in exactly that state.
 
+## Firepower
+
+Firepower has no flat configuration: its state arrives as several FMC REST
+endpoints, one row each. Those devices are **mirrored, not modelled** — the JSON
+is rendered canonically (sorted keys, fixed indentation) so a diff means
+something, redacted by walking the structure for credential-named fields, and
+written one file per endpoint alongside the CLI devices.
+
+Before trusting the mirror for these, find out which fields move on their own:
+
+```bash
+netconfig-mirror volatile DC4_FW1
+```
+
+It compares the two most recent captures of each endpoint and lists what
+differed. Anything there that should not have changed is a volatile field, and
+left in it commits that firewall every night for nothing. Guessing the list
+instead produces either that daily empty commit or a silently dropped field —
+which is why the tool finds them from evidence.
+
+JSON needs its own redaction: `"password": "hunter2"` matches none of the
+line-oriented CLI rules, so without it a third of the estate would have no
+fail-closed check at all.
+
 ## Asking questions of the mirror
 
 ```bash

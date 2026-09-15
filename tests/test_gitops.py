@@ -190,3 +190,20 @@ def test_push_needed_tracks_commits_the_remote_does_not_have(tmp_path, repo):
     repo.push()
     _git(repo.path, "fetch", "-q", "origin")
     assert not repo.push_needed()
+
+
+def test_write_files_reports_change_and_stays_quiet_when_identical(repo):
+    """Firepower arrives as several JSON endpoints per device. Same
+    content-versus-provenance split as the CLI path: metadata is only rewritten
+    when something real moved."""
+    files = {"fmc_acp.json": '{"rules": []}\n', "fmc_nat.json": '{"rules": []}\n'}
+    assert repo.write_files("inventory/dc4/fw1", files)
+    repo.write_meta("inventory/dc4/fw1", "platform: firepower\n")
+    repo.commit("first")
+
+    assert not repo.write_files("inventory/dc4/fw1", files)
+    assert repo.commit("second") is None
+
+    files["fmc_acp.json"] = '{"rules": [{"name": "allow"}]}\n'
+    assert repo.write_files("inventory/dc4/fw1", files)
+    assert repo.commit("third") is not None

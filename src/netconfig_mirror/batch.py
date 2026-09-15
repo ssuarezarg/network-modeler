@@ -22,6 +22,10 @@ from .freshness import DEFAULT_STALE_AFTER
 from .inventory import SUSPICIOUS_CAPTURE_BYTES
 
 OK = "ok"
+# Captured and versioned, but not modelled: Firepower arrives as JSON endpoints
+# rather than a configuration. Counted apart from OK so it cannot quietly drag
+# the coverage figures — there is no coverage to report for it.
+MIRRORED = "mirrored (json, no model)"
 TOO_SMALL = "capture too small"
 NO_PARSER = "no parser"
 REDACTION_REFUSED = "redaction refused"
@@ -30,7 +34,7 @@ ERROR = "error"
 # Order in which outcomes are reported: worst first, because a redaction refusal
 # is a credential exposure upstream and should not be read after a list of
 # routine skips.
-OUTCOME_ORDER = [REDACTION_REFUSED, ERROR, TOO_SMALL, NO_PARSER, OK]
+OUTCOME_ORDER = [REDACTION_REFUSED, ERROR, TOO_SMALL, NO_PARSER, MIRRORED, OK]
 
 
 @dataclass

@@ -157,6 +157,22 @@ class MirrorRepo:
                            f"{relative}/device.yaml", f"{relative}/raw.cfg")
         return bool(status.strip())
 
+    def write_files(self, relative: str, files: dict[str, str]) -> bool:
+        """Write several files into one device directory.
+
+        Returns True if any of them differ from HEAD. Used for platforms whose
+        configuration is several documents rather than one — the same
+        content-versus-provenance split as `write_content`, so the metadata is
+        only rewritten when something real moved.
+        """
+        directory = self.path / relative
+        directory.mkdir(parents=True, exist_ok=True)
+        for name, content in files.items():
+            (directory / name).write_text(content, encoding="utf-8")
+
+        paths = [f"{relative}/{name}" for name in files]
+        return bool(self._git("status", "--porcelain", "--", *paths).strip())
+
     def write_meta(self, relative: str, meta_yaml: str) -> None:
         (self.path / relative / "meta.yaml").write_text(meta_yaml, encoding="utf-8")
 

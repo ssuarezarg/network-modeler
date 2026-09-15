@@ -150,6 +150,21 @@ SELECT d.hostname, d.collector_id
  LIMIT 20
 """
 
+# All rows for one device, restricted to a set of commands. Firepower needs
+# several endpoints composed into one artifact, so unlike the CLI devices it is
+# many rows per device rather than one.
+LATEST_COMPOSITE = """
+SELECT DISTINCT ON (r.device_id, r.command)
+       r.id, r.device_id, r.command, r.output, r.collected_at,
+       d.hostname, d.vendor, d.os_version, d.device_type,
+       d.serial_number, d.role, d.location, d.collector_id
+  FROM raw_outputs r
+  JOIN devices d ON d.id = r.device_id
+ WHERE r.command = ANY(%(commands)s)
+   AND (%(collector_id)s::text IS NULL OR d.collector_id = %(collector_id)s::text)
+ ORDER BY r.device_id, r.command, r.collected_at DESC
+"""
+
 # Commands that look like they return a whole configuration but that this module
 # does not handle. Run it periodically: a new vendor onboarded to the collector
 # would otherwise be missing from the mirror with no error anywhere.
@@ -448,3 +463,60 @@ def similar_hostnames(connection, hostname: str) -> list[tuple[str, str]]:
     with connection.cursor() as cursor:
         cursor.execute(SIMILAR_HOSTNAMES, {"fragment": fragment})
         return list(cursor.fetchall())
+
+
+def fetch_composite(connection, *, commands: tuple[str, ...] = FTD_COMMANDS,
+                    collector_id: str | None = None) -> dict[str, list[CapturedConfig]]:
+    """Captures grouped by device, for platforms whose configuration is spread
+    across several endpoints rather than one command."""
+    with connection.cursor() as cursor:
+        cursor.execute(LATEST_COMPOSITE,
+                       {"commands": list(commands), "collector_id": collector_id})
+        columns = [column[0] for column in cursor.description]
+        rows = cursor.fetchall()
+
+    grouped: dict[str, list[CapturedConfig]] = {}
+    for row in rows:
+        capture = CapturedConfig(**_row_to_kwargs(columns, row))
+        grouped.setdefault(capture.device_id, []).append(capture)
+
+    # `fmc_devices` and `fmc_version` describe the manager, not a firewall; a
+    # device that has only those is the FMC itself and has no configuration to
+    # mirror.
+    substantive = {"fmc_device_detail", "fmc_interfaces", "fmc_acp",
+                   "fmc_routes", "fmc_nat"}
+    return {device_id: captures for device_id, captures in grouped.items()
+            if any(c.command in substantive for c in captures)}
+
+
+TWO_LATEST_PER_COMMAND = """
+SELECT r.command, r.output, r.collected_at
+  FROM raw_outputs r
+  JOIN devices d ON d.id = r.device_id
+ WHERE lower(d.hostname) = lower(%(hostname)s)
+   AND r.command = ANY(%(commands)s)
+ ORDER BY r.command, r.collected_at DESC
+"""
+
+
+def fetch_recent_pairs(connection, hostname: str,
+                       commands: tuple[str, ...] = FTD_COMMANDS
+                       ) -> dict[str, list[tuple[str, datetime]]]:
+    """The two most recent captures of each command for one device.
+
+    Enough to see which fields move on their own. Two captures with no
+    configuration change between them are the only honest way to build a
+    volatile-field list; guessing gives either a daily empty commit or a
+    silently dropped field.
+    """
+    with connection.cursor() as cursor:
+        cursor.execute(TWO_LATEST_PER_COMMAND,
+                       {"hostname": hostname, "commands": list(commands)})
+        rows = cursor.fetchall()
+
+    pairs: dict[str, list[tuple[str, datetime]]] = {}
+    for command, output, collected_at in rows:
+        entries = pairs.setdefault(command, [])
+        if len(entries) < 2:
+            entries.append((output, collected_at))
+    return pairs

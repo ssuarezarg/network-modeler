@@ -22,7 +22,7 @@ from pathlib import Path
 import yaml
 
 from . import batch as batchlib
-from . import analysis, envfile, extract, gitops, inventory, layout
+from . import analysis, envfile, extract, gitops, inventory, jsondoc, layout
 from .blocks import ConfigDocument
 from .detect import detect
 from . import freshness as freshnesslib
@@ -393,6 +393,25 @@ def cmd_sync(args: argparse.Namespace) -> int:
         if result.outcome == batchlib.OK:
             keep.add(relative)
 
+    # Firepower: several JSON endpoints per device, mirrored verbatim rather
+    # than modelled. Skipped entirely on a filtered run that named a vendor,
+    # since the filter was about CLI platforms.
+    if not args.vendor:
+        connection = extract.connect(args.dsn)
+        try:
+            composite = extract.fetch_composite(connection, collector_id=args.collector_id)
+        finally:
+            connection.close()
+
+        for captures in composite.values():
+            first = captures[0]
+            if not _matches(first, args):
+                continue
+            result = _sync_composite(repo, first, captures, key, sync)
+            report.results.append(result)
+            if result.outcome == batchlib.MIRRORED:
+                keep.add(result.path)
+
     try:
         sync.removed = repo.prune(keep, complete_run=complete_run)
     except gitops.GitError as error:
@@ -529,6 +548,104 @@ def cmd_audit(args: argparse.Namespace) -> int:
     return EXIT_BATCH_ATTENTION if dangling else EXIT_OK
 
 
+def _sync_composite(repo, capture, captures, key: bytes,
+                    sync: "gitops.SyncReport") -> "batchlib.DeviceResult":
+    """Mirror one device whose configuration is several JSON endpoints."""
+    relative = layout.device_path(capture)
+    result = batchlib.DeviceResult(
+        hostname=capture.hostname or capture.device_id,
+        site=layout.site_of(capture), outcome=batchlib.MIRRORED,
+        platform="firepower", collected_at=capture.collected_at, path=relative)
+
+    rendered: dict[str, str] = {}
+    for item in sorted(captures, key=lambda c: c.command):
+        parsed = jsondoc.parse(item.output)
+        if parsed is None:
+            # Not JSON after all. Keep it verbatim rather than guessing — the
+            # capture is still worth versioning, and the surprise is worth
+            # seeing in the diff.
+            rendered[f"{item.command}.txt"] = item.output
+            continue
+
+        parsed = jsondoc.strip_volatile(parsed)
+        parsed, redaction = jsondoc.redact(parsed, key)
+        residuals = jsondoc.audit_residuals(parsed)
+        if residuals:
+            result.outcome = batchlib.REDACTION_REFUSED
+            result.detail = f"{len(residuals)} credential field(s): {residuals[:3]}"
+            return result
+        rendered[f"{item.command}.json"] = jsondoc.render(parsed)
+
+    changed = repo.write_files(relative, rendered)
+    if changed:
+        repo.write_meta(relative, yaml.safe_dump({
+            "platform": "firepower",
+            "modelled": False,
+            "note": "Mirrored as JSON endpoints. Firepower has no flat "
+                    "configuration; this is L0 only.",
+            "endpoints": sorted(rendered),
+            "source": {"device_id": capture.device_id,
+                       "collected_at": capture.collected_at.isoformat(),
+                       "collector_id": capture.collector_id,
+                       "location": capture.location},
+        }, sort_keys=False, allow_unicode=True))
+        sync.changed.append(relative)
+        print(f"  changed  {relative[len(layout.ROOT) + 1:]}  (json)")
+
+    return result
+
+
+def cmd_volatile(args: argparse.Namespace) -> int:
+    """Report which JSON fields move between two captures of one device.
+
+    Run this before trusting the mirror for a JSON platform. Anything listed
+    changes without anybody touching the device, and left in it produces a
+    commit every night for a firewall that did not change.
+    """
+    connection = extract.connect(args.dsn)
+    try:
+        pairs = extract.fetch_recent_pairs(connection, args.hostname)
+    finally:
+        connection.close()
+
+    if not pairs:
+        print(f"No JSON captures for {args.hostname!r}.", file=sys.stderr)
+        return EXIT_NOT_FOUND
+
+    print(f"# Fields that moved between the two most recent captures — "
+          f"{args.hostname}\n")
+    total = 0
+    for command, captures in sorted(pairs.items()):
+        if len(captures) < 2:
+            print(f"## {command}\n  only one capture; nothing to compare\n")
+            continue
+
+        newer, older = jsondoc.parse(captures[0][0]), jsondoc.parse(captures[1][0])
+        if newer is None or older is None:
+            print(f"## {command}\n  not JSON; compared as text — "
+                  f"{'identical' if captures[0][0] == captures[1][0] else 'differs'}\n")
+            continue
+
+        moved = jsondoc.find_volatile(jsondoc.strip_volatile(older),
+                                      jsondoc.strip_volatile(newer))
+        print(f"## {command}   ({captures[1][1]:%Y-%m-%d %H:%M} -> "
+              f"{captures[0][1]:%Y-%m-%d %H:%M})\n")
+        if not moved:
+            print("  nothing moved\n")
+            continue
+        total += len(moved)
+        for path in moved[:args.limit]:
+            print(f"  {path}")
+        if len(moved) > args.limit:
+            print(f"  ... and {len(moved) - args.limit} more")
+        print()
+
+    if total:
+        print("Anything above that should NOT have changed belongs in the")
+        print("volatile list, or every sync will commit this device again.")
+    return EXIT_OK
+
+
 def cmd_inventory(args: argparse.Namespace) -> int:
     """Survey the estate: platforms, sites, tenants, collisions, bad captures."""
     connection = extract.connect(args.dsn)
@@ -599,6 +716,16 @@ def main(argv: list[str] | None = None) -> int:
     sync.add_argument("--collector-id", help="limit to one tenant")
     _common(sync)
     sync.set_defaults(func=cmd_sync)
+
+    volatile = sub.add_parser(
+        "volatile", help="show which JSON fields move between two captures of a device")
+    volatile.add_argument("hostname")
+    volatile.add_argument("--dsn", help="libpq connection string (default: PG* env vars)")
+    volatile.add_argument("--limit", type=int, default=25,
+                          help="how many differing paths to list per endpoint")
+    volatile.add_argument("--env-file", default=None,
+                          help="settings file to load (default: ./.env if present)")
+    volatile.set_defaults(func=cmd_volatile)
 
     compare = sub.add_parser(
         "compare", help="compare the routing policy of two devices in the mirror")

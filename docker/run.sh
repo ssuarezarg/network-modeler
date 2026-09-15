@@ -47,7 +47,8 @@ case "$SUBCOMMAND" in
   sync)      EXTRA=(--repo /mirror --key-file /secrets/hmac.key --env-file /secrets/db.env) ;;
   batch|device|file)
              EXTRA=(--key-file /secrets/hmac.key --env-file /secrets/db.env) ;;
-  inventory) EXTRA=(--env-file /secrets/db.env) ;;
+  inventory|volatile)
+             EXTRA=(--env-file /secrets/db.env) ;;
   # Read the mirror only: no database, no key.
   compare|audit)
              EXTRA=(--repo /mirror) ;;
