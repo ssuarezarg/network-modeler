@@ -173,6 +173,11 @@ class Finding:
     hostname: str
     kind: str
     detail: str
+    # Two directories can hold the same hostname - in this estate, the phantom
+    # `Kernel` devices carry copies of the UK-CLL switch configurations, so
+    # their parsed hostname is that of the real switch. Grouping a report by
+    # hostname merges them and lists every finding twice.
+    path: str = ""
 
 
 DANGLING = "route-map matches a prefix-list that does not exist"
@@ -193,49 +198,70 @@ def audit(devices: list[DeviceDoc]) -> list[Finding]:
                     hint = f" (did you mean {suggestion[0]}?)" if suggestion else ""
                     findings.append(Finding(
                         device.hostname, DANGLING,
-                        f"{route_map['name']} matches {name}{hint}"))
+                        f"{route_map['name']} matches {name}{hint}", device.path))
 
         for prefix_list in lists.values():
             if not prefix_list.get("referenced_by"):
                 findings.append(Finding(
                     device.hostname, ORPHANED,
-                    f"{prefix_list['name']} ({prefix_list.get('entry_count', 0)} entries)"))
+                    f"{prefix_list['name']} ({prefix_list.get('entry_count', 0)} entries)",
+                    device.path))
 
     return findings
 
 
-def render_audit(findings: list[Finding], devices: list[DeviceDoc]) -> str:
-    lines = [f"# Routing policy audit — {len(devices)} device(s)", ""]
-
+def render_audit(findings: list[Finding], devices: list[DeviceDoc],
+                 *, full: bool = False, per_device: int = 8) -> str:
     dangling = [f for f in findings if f.kind == DANGLING]
     orphaned = [f for f in findings if f.kind == ORPHANED]
+
+    lines = [
+        f"# Routing policy audit — {len(devices)} device(s)",
+        "",
+        f"**{len(dangling)} dangling reference(s), {len(orphaned)} unreferenced "
+        f"prefix-list(s)**",
+        "",
+    ]
 
     lines += ["## Route-maps matching a prefix-list that does not exist", ""]
     if dangling:
         lines += [
-            "This is the one worth acting on. A route-map matching a name that",
-            "does not exist does not fail — it matches nothing. Whatever policy",
-            "was intended is not being applied, and nothing reports it.",
+            "A route-map matching a name that does not exist does not fail — it",
+            "matches nothing, so the policy that was intended is not applied and",
+            "nothing reports it.",
+            "",
+            "**Confirm against raw.cfg before reporting these.** A name can also",
+            "appear here because this parser failed to recognise the definition,",
+            "which is a fault here and not on the device:",
+            "",
+            "    grep -n 'prefix-list <name>' <device>/raw.cfg",
             "",
         ]
         for finding in dangling:
-            lines.append(f"  {finding.hostname:<24} {finding.detail}")
+            location = finding.path.split("/", 1)[-1] if finding.path else finding.hostname
+            lines.append(f"  {location:<34} {finding.detail}")
     else:
         lines.append("  None.")
     lines.append("")
 
     lines += ["## Prefix-lists nothing references", ""]
     if orphaned:
-        lines += ["Inert: entries that announce and filter nothing. Usually the "
+        lines += ["Inert: entries that filter and announce nothing. Usually the "
                   "remains of a",
-                  "change that was never finished.", ""]
-        by_host: dict[str, list[str]] = {}
+                  "change that was never finished. Informational — review at "
+                  "leisure.", ""]
+        by_device: dict[str, list[str]] = {}
         for finding in orphaned:
-            by_host.setdefault(finding.hostname, []).append(finding.detail)
-        for hostname, details in sorted(by_host.items()):
-            lines.append(f"  {hostname}  ({len(details)})")
-            for detail in details:
+            key = f"{finding.hostname}  [{finding.path}]" if finding.path else finding.hostname
+            by_device.setdefault(key, []).append(finding.detail)
+        for device_key, details in sorted(by_device.items(), key=lambda kv: -len(kv[1])):
+            lines.append(f"  {device_key}  ({len(details)})")
+            shown = details if full else details[:per_device]
+            for detail in shown:
                 lines.append(f"      {detail}")
+            if len(details) > len(shown):
+                lines.append(f"      ... and {len(details) - len(shown)} more "
+                             f"(--full to list them)")
     else:
         lines.append("  None.")
     lines.append("")

@@ -134,3 +134,46 @@ def test_comparison_renders_without_a_device_yaml_key_missing(tmp_path):
     })
     out = render_comparison(devices[0], devices[1], compare_policy(devices[0], devices[1]))
     assert "r1 vs r2" in out
+
+
+def test_two_directories_with_the_same_hostname_are_not_merged(tmp_path):
+    """The phantom `Kernel` devices hold copies of the UK-CLL switch configs, so
+    their parsed hostname is that of the real switch. Grouping a report by
+    hostname merged them and listed every finding twice."""
+    (tmp_path / "inventory" / "cll" / "uk-cll-l3-sw1").mkdir(parents=True)
+    (tmp_path / "inventory" / "cll" / "kernel-2da233ff").mkdir(parents=True)
+    doc = {"device": {"hostname": "UK-CLL-L3-SW1"},
+           "prefix_lists": [_pl("UNUSED", ["10.0.0.0/8"])]}
+    for name in ("uk-cll-l3-sw1", "kernel-2da233ff"):
+        (tmp_path / "inventory" / "cll" / name / "device.yaml").write_text(
+            yaml.safe_dump(doc), encoding="utf-8")
+
+    devices = load_devices(tmp_path)
+    out = render_audit(audit(devices), devices, full=True)
+
+    assert out.count("kernel-2da233ff") >= 1
+    assert out.count("uk-cll-l3-sw1") >= 1
+    # One entry per directory, not both collapsed under one heading.
+    assert out.count("UNUSED (1 entries)") == 2
+
+
+def test_long_orphan_lists_are_sampled_unless_full_is_asked_for(tmp_path):
+    many = [_pl(f"L{i}", ["10.0.0.0/8"]) for i in range(20)]
+    devices = _mirror(tmp_path, {"r1": {"device": {"hostname": "r1"},
+                                        "prefix_lists": many}})
+    sampled = render_audit(audit(devices), devices)
+    assert "and 12 more" in sampled
+    assert "--full" in sampled
+    assert "and 12 more" not in render_audit(audit(devices), devices, full=True)
+
+
+def test_the_report_warns_that_a_dangling_name_may_be_a_parser_gap(tmp_path):
+    """A name can appear dangling because this parser failed to recognise the
+    definition — a fault here, not on the device. Saying so keeps the report
+    from being taken to a customer as a misconfiguration."""
+    devices = _mirror(tmp_path, {
+        "r1": {"device": {"hostname": "r1"},
+               "route_maps": [{"name": "RM", "prefix_lists": ["MISSING"]}]},
+    })
+    out = render_audit(audit(devices), devices)
+    assert "raw.cfg" in out and "parser" in out
