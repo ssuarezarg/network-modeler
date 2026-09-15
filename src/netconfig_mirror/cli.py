@@ -22,7 +22,7 @@ from pathlib import Path
 import yaml
 
 from . import batch as batchlib
-from . import envfile, extract, gitops, inventory, layout
+from . import analysis, envfile, extract, gitops, inventory, layout
 from .blocks import ConfigDocument
 from .detect import detect
 from . import freshness as freshnesslib
@@ -43,6 +43,8 @@ EXIT_NOT_FOUND = 4
 EXIT_BATCH_ATTENTION = 5
 # The repository could not be used as given.
 EXIT_REPO = 6
+# A device named on the command line is not in the mirror.
+EXIT_NO_DEVICE = 7
 
 
 def load_key(key_file: str | None) -> bytes:
@@ -489,6 +491,44 @@ def _sync_one(repo, capture, key: bytes, args, relative: str,
     return result
 
 
+def cmd_compare(args: argparse.Namespace) -> int:
+    """Two devices side by side, by the shape of the difference not its text."""
+    devices = analysis.load_devices(args.repo)
+    first = analysis.find_device(devices, args.device_a)
+    second = analysis.find_device(devices, args.device_b)
+
+    for name, found in ((args.device_a, first), (args.device_b, second)):
+        if found is None:
+            print(f"No device matching {name!r} in {args.repo}.", file=sys.stderr)
+            close = [d.hostname for d in devices][:200]
+            import difflib
+            hint = difflib.get_close_matches(name, close, n=3, cutoff=0.5)
+            if hint:
+                print("Did you mean: " + ", ".join(hint), file=sys.stderr)
+            return EXIT_NO_DEVICE
+
+    print(analysis.render_comparison(first, second,
+                                     analysis.compare_policy(first, second)))
+    return EXIT_OK
+
+
+def cmd_audit(args: argparse.Namespace) -> int:
+    """Policy that cannot do what it appears to do, across the whole mirror."""
+    devices = analysis.load_devices(args.repo)
+    findings = analysis.audit(devices)
+    report = analysis.render_audit(findings, devices)
+
+    if args.out_file:
+        Path(args.out_file).write_text(report, encoding="utf-8")
+        print(f"wrote {args.out_file}")
+    else:
+        print(report)
+
+    # A dangling reference is a live misconfiguration, not an observation.
+    dangling = [f for f in findings if f.kind == analysis.DANGLING]
+    return EXIT_BATCH_ATTENTION if dangling else EXIT_OK
+
+
 def cmd_inventory(args: argparse.Namespace) -> int:
     """Survey the estate: platforms, sites, tenants, collisions, bad captures."""
     connection = extract.connect(args.dsn)
@@ -559,6 +599,21 @@ def main(argv: list[str] | None = None) -> int:
     sync.add_argument("--collector-id", help="limit to one tenant")
     _common(sync)
     sync.set_defaults(func=cmd_sync)
+
+    compare = sub.add_parser(
+        "compare", help="compare the routing policy of two devices in the mirror")
+    compare.add_argument("device_a")
+    compare.add_argument("device_b")
+    compare.add_argument("--repo", required=True, help="path to the mirror repository")
+    compare.add_argument("--env-file", default=None, help=argparse.SUPPRESS)
+    compare.set_defaults(func=cmd_compare)
+
+    policy_audit = sub.add_parser(
+        "audit", help="find routing policy that cannot do what it appears to do")
+    policy_audit.add_argument("--repo", required=True, help="path to the mirror repository")
+    policy_audit.add_argument("--out-file", help="write the report here instead of stdout")
+    policy_audit.add_argument("--env-file", default=None, help=argparse.SUPPRESS)
+    policy_audit.set_defaults(func=cmd_audit)
 
     survey = sub.add_parser(
         "inventory", help="survey the estate: platforms, sites, tenants, "

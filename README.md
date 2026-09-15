@@ -119,6 +119,32 @@ computed, not parsed, and it is the reason modelling them earns its place — a
 prefix-list nothing references announces nothing, however many entries it holds.
 On one real router, nine of thirty were in exactly that state.
 
+## Asking questions of the mirror
+
+```bash
+netconfig-mirror audit --repo ./mirror
+netconfig-mirror compare dc4-edge-r1 dc4-edge-r2 --repo ./mirror
+```
+
+`audit` looks for routing policy that cannot do what it appears to do:
+
+- **Route-maps matching a prefix-list that does not exist.** The one worth
+  acting on. A route-map matching a mistyped name does not fail — it matches
+  nothing, so the policy the engineer believed they applied was never applied,
+  and nothing anywhere reports it. Exits 5 when any are found.
+- **Prefix-lists nothing references.** Inert entries that filter and announce
+  nothing, usually left by a change that was never finished.
+
+`compare` puts two devices side by side. A redundant pair is *supposed* to
+differ — different loopbacks, different peering addresses, deliberate traffic
+engineering — so a raw diff of two `device.yaml` files runs to thousands of
+lines with the real finding buried in it. This reports the shape of the
+difference: what exists on only one side, what shares a name but differs, and
+what is merely renumbered. Names that closely resemble each other across the two
+devices are called out as probable typos.
+
+Neither touches the database or needs the HMAC key; they read the mirror.
+
 ## Reading the coverage output
 
 ```
