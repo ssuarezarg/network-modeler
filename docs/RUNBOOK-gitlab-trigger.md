@@ -21,7 +21,12 @@ curl -L --proto '=https' --tlsv1.2 -sSf \
   https://packages.gitlab.com/install/repositories/runner/gitlab-runner/script.deb.sh | sudo bash
 sudo apt-get install -y gitlab-runner
 
-# Reinstall the service under the account that owns the files
+# Reinstall the service under the account that owns the files.
+# Create the working directory first: the service does not create it, and
+# without it the runner dies on startup with "chdir ...: no such file or
+# directory" and systemd restarts it forever.
+sudo -u supportteam mkdir -p /home/supportteam/gitlab-runner
+
 sudo gitlab-runner uninstall
 sudo gitlab-runner install --user supportteam \
      --working-directory /home/supportteam/gitlab-runner
@@ -98,13 +103,25 @@ page. A grey dot means it registered but is not polling; check
 sudo $EDITOR /etc/gitlab-runner/config.toml
 ```
 
-Set `concurrent = 1` at the top, and add the `environment` block from
+Set `concurrent = 1` at the top, and add the `environment` array from
 `docker/runner-config.example.toml` to the `[[runners]]` section. These are host
 paths, not values: the secrets stay in files that only a host administrator can
 change.
 
+Two things about where it goes:
+
+- It must sit **inside `[[runners]]` and before `[runners.cache]`**. In TOML a
+  bare key written after a sub-table header belongs to that sub-table, so an
+  `environment` placed below `[runners.cache]` is silently attached to the cache
+  settings and never reaches the job.
+- Write it on **one line**. A multi-line array pasted into an editor is easy to
+  truncate, and the resulting error — `expected value but found "runners"` —
+  points at the next section rather than at the missing bracket.
+
 ```bash
+sudo gitlab-runner verify        # rejects a malformed config before restarting
 sudo systemctl restart gitlab-runner
+systemctl is-active gitlab-runner
 ```
 
 **Check 3**

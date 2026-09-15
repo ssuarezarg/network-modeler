@@ -34,14 +34,12 @@ check_interval = 10
   executor = "shell"
   shell = "bash"
 
-  environment = [
-    "MIRROR_TOOL_DIR=/home/supportteam/modeler/dt_model",
-    "REPO=/home/supportteam/modeler/mirror",
-    "KEY_FILE=/home/supportteam/.netconfig-mirror.key",
-    "ENV_FILE=/home/supportteam/modeler/dt_model/.env",
-    "SSH_KEY=/home/supportteam/.ssh/mirror-push",
-    "KNOWN_HOSTS=/home/supportteam/.ssh/known_hosts",
-  ]
+  # On one line, and before any [runners.*] sub-table. A bare TOML key written
+  # after a sub-table header belongs to that sub-table, so an `environment`
+  # placed below [runners.cache] never reaches the job; and a multi-line array
+  # pasted into an editor is easy to truncate, which fails with an error naming
+  # the next section rather than the missing bracket.
+  environment = ["MIRROR_TOOL_DIR=/home/supportteam/modeler/dt_model", "REPO=/home/supportteam/modeler/mirror", "KEY_FILE=/home/supportteam/.netconfig-mirror.key", "ENV_FILE=/home/supportteam/modeler/dt_model/.env", "SSH_KEY=/home/supportteam/.ssh/mirror-push", "KNOWN_HOSTS=/home/supportteam/.ssh/known_hosts"]
 
 # WHY THE SECRETS ARE HERE AND NOT IN GITLAB
 #
