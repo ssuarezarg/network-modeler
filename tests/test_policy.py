@@ -88,7 +88,25 @@ def test_one_match_line_can_name_several_prefix_lists():
 
 def test_a_referenced_prefix_list_records_who_uses_it():
     lists = {p.name: p for p in _ios().prefix_lists}
-    assert lists["LUMEN_OUT"].referenced_by == ["OTHER", "TO-LUMEN"]
+    assert lists["LUMEN_OUT"].referenced_by == ["route-map OTHER", "route-map TO-LUMEN"]
+
+
+def test_a_prefix_list_applied_straight_to_a_neighbour_counts_as_referenced():
+    """The usual shape on an edge router carrying per-customer policy: no
+    route-map in between. Counting only route-maps reported 1007 of roughly
+    1100 prefix-lists in this estate as inert — the tool being wrong, not the
+    network."""
+    config = IOS_CONFIG + """ neighbor 10.0.0.1 prefix-list ORPHANED in\n"""
+    model, _ = ios.parse(config, platform="iosxe")
+    lists = {p.name: p for p in model.prefix_lists}
+    assert lists["ORPHANED"].referenced_by == ["neighbor 10.0.0.1"]
+
+
+def test_the_direction_survives_on_the_neighbour():
+    config = IOS_CONFIG + """ neighbor 10.0.0.1 prefix-list ORPHANED in\n"""
+    model, _ = ios.parse(config, platform="iosxe")
+    peer = next(n for n in model.bgp.neighbors if n.peer == "10.0.0.1")
+    assert peer.prefix_lists == ["ORPHANED in"]
 
 
 def test_an_unreferenced_prefix_list_is_visibly_inert():
@@ -118,7 +136,7 @@ def test_the_same_extractors_work_on_nxos():
     lists = {p.name: p for p in model.prefix_lists}
     assert lists["FABRIC_OUT"].entry_count == 2
     assert lists["FABRIC_OUT"].entries[0].le == "24"
-    assert lists["FABRIC_OUT"].referenced_by == ["REDIST"]
+    assert lists["FABRIC_OUT"].referenced_by == ["route-map REDIST"]
     assert model.route_maps[0].clauses[0].set == ["metric 100"]
 
 

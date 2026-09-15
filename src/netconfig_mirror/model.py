@@ -63,6 +63,11 @@ class BgpNeighbor:
     vrf: str | None = None
     update_source: str | None = None
     route_maps: list[str] = field(default_factory=list)
+    # Prefix-lists applied straight to this neighbour, as written: "NAME in".
+    # The common shape on an edge router carrying per-customer policy - no
+    # route-map in between - and missing it made almost every prefix-list on
+    # those routers look unreferenced.
+    prefix_lists: list[str] = field(default_factory=list)
     # Whether authentication is configured - never the value, which redaction
     # has already replaced by the time the parser sees it.
     authenticated: bool = False

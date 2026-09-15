@@ -96,8 +96,21 @@ def test_a_route_map_matching_a_nonexistent_list_is_found(tmp_path):
     })
     findings = [f for f in audit(devices) if f.kind == DANGLING]
     assert len(findings) == 1
-    assert "TO-LUMEN matches BP_Plano_in" in findings[0].detail
+    assert "route-map TO-LUMEN uses BP_Plano_in" in findings[0].detail
     assert "did you mean BP_Plano_in_in?" in findings[0].detail
+
+
+def test_a_neighbour_applying_a_nonexistent_list_is_also_found(tmp_path):
+    """On these edge routers, applying a prefix-list straight to a neighbour is
+    the more common shape than going through a route-map."""
+    devices = _mirror(tmp_path, {
+        "r1": {"device": {"hostname": "r1"},
+               "prefix_lists": [_pl("CUST_IN", ["10.0.0.0/8"])],
+               "bgp": {"neighbors": [{"peer": "1.2.3.4",
+                                      "prefix_lists": ["CUST_OUT out"]}]}},
+    })
+    findings = [f for f in audit(devices) if f.kind == DANGLING]
+    assert "neighbor 1.2.3.4 uses CUST_OUT" in findings[0].detail
 
 
 def test_an_unreferenced_list_is_reported_as_inert(tmp_path):

@@ -81,7 +81,7 @@ def parse(config_text: str, *, platform: str | None = None,
     model.access_lists = _access_lists(doc)
     model.prefix_lists = common.parse_prefix_lists(doc)
     model.route_maps = common.parse_route_maps(doc)
-    common.link_references(model.prefix_lists, model.route_maps)
+    common.link_references(model.prefix_lists, model.route_maps, model.bgp)
     model.services = _services(doc)
 
     _acknowledge_remainder(doc)
@@ -225,6 +225,10 @@ def _bgp(doc: ConfigDocument) -> Bgp | None:
             neighbor.update_source = source.group(1)
         elif rmap := re.match(r"route-map\s+(.+)", rest):
             neighbor.route_maps.append(rmap.group(1))
+        elif plist := re.match(r"prefix-list\s+(\S+\s+\S+)", rest):
+            neighbor.prefix_lists.append(plist.group(1))
+        elif dlist := re.match(r"distribute-list\s+prefix\s+(\S+\s+\S+)", rest):
+            neighbor.prefix_lists.append(dlist.group(1))
         elif rest.startswith("password"):
             # Presence only. The value is already a redaction token here.
             neighbor.authenticated = True

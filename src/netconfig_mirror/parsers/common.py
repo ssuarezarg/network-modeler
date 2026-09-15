@@ -106,16 +106,32 @@ def parse_route_maps(doc: ConfigDocument) -> list[RouteMap]:
     return sorted(maps.values(), key=lambda m: m.name)
 
 
-def link_references(prefix_lists: list[PrefixList], route_maps: list[RouteMap]) -> None:
-    """Record which route-maps match each prefix-list.
+def link_references(prefix_lists: list[PrefixList], route_maps: list[RouteMap],
+                    bgp=None) -> None:
+    """Record what references each prefix-list.
 
-    Cheap to compute and the reason prefix-lists are worth modelling: a list no
-    route-map references announces nothing, however many entries it holds.
+    Cheap to compute and the reason prefix-lists are worth modelling: a list
+    nothing references announces nothing, however many entries it holds.
+
+    **Both kinds of reference count.** Route-maps are the obvious one; applying
+    a prefix-list straight to a BGP neighbour is the other, and it is the usual
+    shape on an edge router carrying per-customer policy. Counting only
+    route-maps reported 1007 of roughly 1100 prefix-lists as inert across this
+    estate - which was the tool being wrong, not the network.
     """
     users: dict[str, list[str]] = {}
+
     for route_map in route_maps:
         for name in route_map.prefix_lists:
-            users.setdefault(name, []).append(route_map.name)
+            users.setdefault(name, []).append(f"route-map {route_map.name}")
+
+    if bgp is not None:
+        for neighbor in bgp.neighbors:
+            for applied in neighbor.prefix_lists:
+                # Stored as written - "NAME in" - so the direction survives for
+                # a reader. Only the name identifies the list.
+                name = applied.split()[0]
+                users.setdefault(name, []).append(f"neighbor {neighbor.peer}")
 
     for prefix_list in prefix_lists:
         prefix_list.referenced_by = sorted(set(users.get(prefix_list.name, [])))

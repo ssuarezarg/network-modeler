@@ -190,15 +190,25 @@ def audit(devices: list[DeviceDoc]) -> list[Finding]:
     for device in devices:
         lists = device.prefix_lists
 
-        for route_map in device.route_maps.values():
-            for name in route_map.get("prefix_lists", []):
-                if name not in lists:
-                    suggestion = difflib.get_close_matches(
-                        name, list(lists), n=1, cutoff=_SIMILAR_ENOUGH)
-                    hint = f" (did you mean {suggestion[0]}?)" if suggestion else ""
-                    findings.append(Finding(
-                        device.hostname, DANGLING,
-                        f"{route_map['name']} matches {name}{hint}", device.path))
+        applied: list[tuple[str, str]] = [
+            (f"route-map {rm['name']}", name)
+            for rm in device.route_maps.values()
+            for name in rm.get("prefix_lists", [])
+        ]
+        # A neighbour applying a prefix-list that does not exist is the same
+        # fault, and on these edge routers it is the more common shape.
+        bgp = device.data.get("bgp") or {}
+        for neighbor in bgp.get("neighbors", []):
+            for entry in neighbor.get("prefix_lists", []):
+                applied.append((f"neighbor {neighbor.get('peer')}", entry.split()[0]))
+
+        for where, name in applied:
+            if name not in lists:
+                suggestion = difflib.get_close_matches(
+                    name, list(lists), n=1, cutoff=_SIMILAR_ENOUGH)
+                hint = f" (did you mean {suggestion[0]}?)" if suggestion else ""
+                findings.append(Finding(device.hostname, DANGLING,
+                                        f"{where} uses {name}{hint}", device.path))
 
         for prefix_list in lists.values():
             if not prefix_list.get("referenced_by"):

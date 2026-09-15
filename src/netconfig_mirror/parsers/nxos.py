@@ -78,7 +78,7 @@ def parse(config_text: str, *, platform: str | None = None,
     model.access_lists = _access_lists(doc)
     model.prefix_lists = common.parse_prefix_lists(doc)
     model.route_maps = common.parse_route_maps(doc)
-    common.link_references(model.prefix_lists, model.route_maps)
+    common.link_references(model.prefix_lists, model.route_maps, model.bgp)
     model.services = _services(doc)
 
     for block in doc.blocks:
@@ -302,6 +302,8 @@ def _bgp_neighbors(children: list[str], *, vrf: str | None) -> list[BgpNeighbor]
 def _bgp_neighbor(header: str, children: list[str], *,
                   vrf: str | None = None) -> BgpNeighbor:
     neighbor = BgpNeighbor(peer=header.split()[1], vrf=vrf)
+    # Includes lines nested one level deeper: NX-OS puts a neighbour's
+    # prefix-lists and route-maps inside its address-family block.
     for line in children:
         stripped = line.strip()
         if match := re.match(r"remote-as\s+(\S+)", stripped):
@@ -312,6 +314,8 @@ def _bgp_neighbor(header: str, children: list[str], *,
             neighbor.update_source = match.group(1)
         elif match := re.match(r"route-map\s+(.+)", stripped):
             neighbor.route_maps.append(match.group(1))
+        elif match := re.match(r"prefix-list\s+(\S+\s+\S+)", stripped):
+            neighbor.prefix_lists.append(match.group(1))
         elif stripped.startswith("password"):
             neighbor.authenticated = True
     return neighbor
