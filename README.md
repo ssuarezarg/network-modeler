@@ -49,6 +49,7 @@ convincing-looking model.
 **Commit** writes only what changed. A network that did not change produces no
 commit — that silence is the point.
 
+End-to-end overview for people who will use it: [`docs/FLOW.md`](docs/FLOW.md).
 Design and rationale in full: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 GitLab deployment: [`infra/gitlab/README.md`](infra/gitlab/README.md).
 Being driven by another service:
