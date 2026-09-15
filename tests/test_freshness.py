@@ -86,3 +86,18 @@ def test_naive_collected_at_is_treated_as_utc():
     capture = _capture("r1", days_ago=1)
     naive = CapturedConfig(**{**capture.__dict__, "collected_at": datetime(2026, 9, 10, 12, 0)})
     assert assess([naive], now=NOW)[0].state == "fresh"
+
+
+def test_a_mirrored_json_device_can_be_reported_stale():
+    """Firepower devices are reached by a different path, and leaving them out
+    of this report made them invisible to the one check that catches collection
+    stopping — which is exactly what FMC collection did."""
+    from netconfig_mirror.freshness import FRESH, STALE, Freshness, render_report
+
+    entries = [
+        Freshness("DC4_FW1", NOW - timedelta(days=9), STALE),
+        Freshness("dc4-edge-r1", NOW, FRESH),
+    ]
+    out = render_report(entries)
+    assert "DC4_FW1" in out
+    assert "1 stale of 2" in out

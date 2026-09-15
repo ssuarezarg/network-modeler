@@ -42,6 +42,10 @@ class DeviceResult:
     hostname: str
     site: str
     outcome: str
+    # Needed to recognise one device reached by two paths: Firepower has a
+    # `show running-config` row we cannot parse AND its FMC endpoints, so
+    # without this it is counted twice and the total exceeds the estate.
+    device_id: str = ""
     platform: str | None = None
     detail: str | None = None
     modelled_pct: float | None = None

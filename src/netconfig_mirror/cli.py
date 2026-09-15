@@ -308,6 +308,7 @@ def _model_one(capture, key: bytes, args, collisions) -> "batchlib.DeviceResult"
         hostname=capture.hostname or capture.device_id,
         site=site,
         outcome=batchlib.OK,
+        device_id=capture.device_id,
         collected_at=capture.collected_at,
     )
 
@@ -403,14 +404,22 @@ def cmd_sync(args: argparse.Namespace) -> int:
         finally:
             connection.close()
 
+        mirrored: list[batchlib.DeviceResult] = []
         for captures in composite.values():
             first = captures[0]
             if not _matches(first, args):
                 continue
             result = _sync_composite(repo, first, captures, key, sync)
-            report.results.append(result)
+            mirrored.append(result)
             if result.outcome == batchlib.MIRRORED:
                 keep.add(result.path)
+
+        # One device, two paths. Firepower has a `show running-config` row we
+        # cannot parse as well as its FMC endpoints; keeping both results would
+        # count it twice and report more devices than the estate contains.
+        handled = {r.device_id for r in mirrored}
+        report.results = [r for r in report.results if r.device_id not in handled]
+        report.results += mirrored
 
     try:
         sync.removed = repo.prune(keep, complete_run=complete_run)
@@ -419,10 +428,20 @@ def cmd_sync(args: argparse.Namespace) -> int:
         return EXIT_REPO
 
     modelled = [r for r in report.results if r.outcome == batchlib.OK]
-    repo.write_report("freshness.md", freshnesslib.render_report(
-        freshnesslib.assess(
-            [c for c in selected
-             if layout.device_path(c, collisions) in keep])))
+    # Every mirrored device, whichever path reached it. Leaving the JSON
+    # platforms out would make them invisible to the one report that exists to
+    # catch a device that stopped being collected — and FMC collection is
+    # exactly the kind that stops quietly.
+    fresh_inputs = [
+        freshnesslib.Freshness(
+            device_key=r.hostname,
+            collected_at=r.collected_at,
+            state=freshnesslib.STALE if r.is_stale else freshnesslib.FRESH)
+        for r in report.results
+        if r.collected_at is not None
+        and r.outcome in (batchlib.OK, batchlib.MIRRORED)
+    ]
+    repo.write_report("freshness.md", freshnesslib.render_report(fresh_inputs))
 
     sites = sorted({r.site for r in modelled})
     commit = repo.commit(gitops.build_message(sync, sites=sites if not complete_run else None))
@@ -464,7 +483,8 @@ def _sync_one(repo, capture, key: bytes, args, relative: str,
     result = batchlib.DeviceResult(
         hostname=capture.hostname or capture.device_id,
         site=layout.site_of(capture), outcome=batchlib.OK,
-        collected_at=capture.collected_at, path=relative)
+        device_id=capture.device_id, collected_at=capture.collected_at,
+        path=relative)
 
     attempt, detail = batchlib.should_attempt(capture)
     if not attempt:
@@ -555,7 +575,8 @@ def _sync_composite(repo, capture, captures, key: bytes,
     result = batchlib.DeviceResult(
         hostname=capture.hostname or capture.device_id,
         site=layout.site_of(capture), outcome=batchlib.MIRRORED,
-        platform="firepower", collected_at=capture.collected_at, path=relative)
+        platform="firepower", device_id=capture.device_id,
+        collected_at=capture.collected_at, path=relative)
 
     rendered: dict[str, str] = {}
     for item in sorted(captures, key=lambda c: c.command):

@@ -169,3 +169,20 @@ def test_acknowledgement_file_ignores_comments_and_blanks(tmp_path):
     path = tmp_path / "ack.txt"
     path.write_text("# known bad, raised 2026-09-12\n\nUK-LD5-R316-RTR1\nrtr2  # ditto\n")
     assert load_acknowledged(path) == {"UK-LD5-R316-RTR1", "rtr2"}
+
+
+def test_a_device_reached_by_two_paths_is_counted_once():
+    """Firepower has a `show running-config` row we cannot parse as well as its
+    FMC endpoints. Keeping both results reported 96 devices in an estate of 73."""
+    cli = DeviceResult(hostname="fw1", site="dc4", outcome=NO_PARSER, device_id="d1")
+    other = DeviceResult(hostname="r1", site="dc4", outcome=OK, device_id="d2")
+    mirrored = DeviceResult(hostname="fw1", site="dc4", outcome="mirrored (json, no model)",
+                            device_id="d1")
+
+    results = [cli, other]
+    handled = {mirrored.device_id}
+    results = [r for r in results if r.device_id not in handled] + [mirrored]
+
+    assert len(results) == 2
+    assert {r.device_id for r in results} == {"d1", "d2"}
+    assert not any(r.outcome == NO_PARSER for r in results)
