@@ -33,9 +33,23 @@ KNOWN_HOSTS="${KNOWN_HOSTS:-$HOME/.ssh/known_hosts}"
 # docker/acknowledged.example. Mounted rather than passed as a path, because a
 # host path handed to --ack-file does not exist inside the container - the file
 # is then silently absent and every known-bad device demands attention again.
-ACK_FILE="${ACK_FILE:-$(dirname "$0")/acknowledged.txt}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ACK_FILE="${ACK_FILE:-$SCRIPT_DIR/acknowledged.txt}"
 
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+
+# Docker refuses a relative path for a bind mount, and says so in terms of
+# volume names rather than of the path you gave it: "includes invalid
+# characters for a local volume name". Catching it here names the variable.
+absolute() {
+  local name="$1" value="$2"
+  [[ "$value" = /* ]] || die "$name must be an absolute path, got: $value"
+}
+
+for pair in "REPO:$REPO" "KEY_FILE:$KEY_FILE" "ENV_FILE:$ENV_FILE" \
+            "SSH_KEY:$SSH_KEY" "KNOWN_HOSTS:$KNOWN_HOSTS" "ACK_FILE:$ACK_FILE"; do
+  absolute "${pair%%:*}" "${pair#*:}"
+done
 
 [[ -d "$REPO/.git" ]]   || die "REPO=$REPO is not a git repository. Clone the mirror there first."
 [[ -f "$KEY_FILE" ]]    || die "KEY_FILE=$KEY_FILE does not exist. Generate it with: openssl rand -hex 32 > $KEY_FILE"
