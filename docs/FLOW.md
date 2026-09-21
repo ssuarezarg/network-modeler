@@ -76,6 +76,31 @@ request waits rather than racing. Two syncs at once would both write the
 repository's working tree and leave it inconsistent, so callers do not need to
 coordinate.
 
+### The pipeline always shows the commit before the one it made
+
+A pipeline is bound to a commit when it is created, and never updated. So the
+pipeline page shows whatever was at the tip of `main` when it was triggered —
+which is the commit the *previous* run produced — while the repository has
+already moved on to the commit this run just made.
+
+```
+a6cf020  sync: 3 changed    the repository's HEAD, made by this run
+a786bec  sync: 5 changed    what the pipeline page shows
+```
+
+Nothing is wrong: producing the next commit is the job's whole purpose, so it
+cannot be the commit the pipeline started from. It is more noticeable here than
+in ordinary CI because the pipeline runs with `GIT_STRATEGY: none` and never
+checks the repository out at all — the associated commit is purely a label for
+what the state was at the start.
+
+The commit the run actually created is named near the end of the job log:
+
+```
+committed a6cf020: 3 changed, 0 renamed, 0 removed
+pushed
+```
+
 ---
 
 ## Reading the mirror
