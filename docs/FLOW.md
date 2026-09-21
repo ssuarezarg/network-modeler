@@ -129,6 +129,36 @@ Paths must be URL-encoded: `/` becomes `%2F`.
 
 ---
 
+## Reading a sync commit
+
+```bash
+git show --stat <sha>                    # which devices changed
+git show <sha> -- '*/device.yaml'        # what changed, in the model
+git show <sha> -- '*/raw.cfg'            # the same change in the configuration
+```
+
+The model diff is the one to read first: it groups and orders, so a changed BGP
+neighbour or interface description is two lines instead of being scattered
+through a couple of thousand.
+
+**When `device.yaml` shows nothing and `raw.cfg` shows plenty, that is a
+finding about the model, not a quiet commit.** Something real changed in a part
+of the configuration the model does not cover yet, and the mirror caught it only
+because it keeps the configuration verbatim alongside.
+
+That signal is worth acting on, because it says what to model next from evidence
+rather than from guesswork. It is how prefix-lists and route-maps came to be
+modelled: six devices changed together, `device.yaml` was identical on all six,
+and the change turned out to be a hundred new prefix-list entries in the routing
+policy toward the transit carriers — the part of these configurations that
+people actually edit.
+
+`meta.yaml` changes alongside any real change and carries the coverage figures
+for that capture, so a drop in `accounted` between two commits is the same kind
+of signal: the device grew configuration the parser has never seen.
+
+---
+
 ## What it produces
 
 ```
