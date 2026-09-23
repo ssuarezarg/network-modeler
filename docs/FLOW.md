@@ -264,8 +264,17 @@ UK-LD5-R316-RTR1                                  # a device's collection failur
 dangling:HK1-L3-SW:route-map static-into-bgp:redistribute-static-into-bgp
 ```
 
-`audit` prints the key of every unacknowledged finding when it exits non-zero,
-so they are copied rather than typed. A key is built from the structural parts —
+Generate the keys rather than typing them:
+
+```bash
+netconfig-mirror audit --repo <path> --ack-file <file> --keys >> <file>
+```
+
+`--keys` prints only findings that are not yet acknowledged, so re-running it
+appends what is new and nothing else. Read what it appended before committing:
+every line means "this is known and somebody is dealing with it", and a finding
+parked there that nobody is working on is worse than no file at all, because it
+now looks handled. A key is built from the structural parts —
 device, what refers, what it refers to — and never from the sentence describing
 the finding, because that sentence carries a "did you mean …?" suggestion that
 changes as the device changes. An acknowledgement keyed on the sentence would

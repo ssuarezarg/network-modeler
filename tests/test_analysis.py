@@ -246,3 +246,17 @@ def test_acknowledging_one_device_does_not_cover_the_same_name_elsewhere(tmp_pat
 
     findings = audit(devices, {"dangling:r1:route-map RM:MISSING"})
     assert [f.hostname for f in unacknowledged_dangling(findings)] == ["r2"]
+
+
+def test_keys_are_generated_not_transcribed(tmp_path):
+    """Hand-copying keys is how an acknowledgement silently stops matching: one
+    wrong character and the finding alerts again with nothing to explain why.
+    The key a finding reports must be exactly what acknowledges it."""
+    from netconfig_mirror.analysis import unacknowledged_dangling
+
+    devices = _mirror(tmp_path, {
+        "r1": {"device": {"hostname": "r1"},
+               "route_maps": [{"name": "RM", "prefix_lists": ["MISSING"]}]},
+    })
+    key = unacknowledged_dangling(audit(devices))[0].key
+    assert unacknowledged_dangling(audit(devices, {key})) == []

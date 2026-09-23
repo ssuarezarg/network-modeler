@@ -557,6 +557,15 @@ def cmd_audit(args: argparse.Namespace) -> int:
     acknowledged = (batchlib.load_acknowledged(args.ack_file)
                     if args.ack_file else set())
     findings = analysis.audit(devices, acknowledged)
+    if args.keys:
+        # Keys only, one per line, for appending to the acknowledgement file.
+        # Transcribing them by hand is how an acknowledgement silently stops
+        # matching: one wrong character and the finding alerts again with
+        # nothing to explain why.
+        for finding in analysis.unacknowledged_dangling(findings):
+            print(finding.key)
+        return EXIT_OK
+
     report = analysis.render_audit(findings, devices, full=args.full)
 
     if args.out_file:
@@ -777,6 +786,9 @@ def main(argv: list[str] | None = None) -> int:
     policy_audit.add_argument("--ack-file", default=None,
                               help="findings already raised; they stay in the report "
                                    "but stop setting the exit code")
+    policy_audit.add_argument("--keys", action="store_true",
+                              help="print the key of every unacknowledged finding, "
+                                   "one per line, to append to the acknowledgement file")
     policy_audit.add_argument("--full", action="store_true",
                               help="list every unreferenced prefix-list instead of a sample")
     policy_audit.add_argument("--env-file", default=None, help=argparse.SUPPRESS)

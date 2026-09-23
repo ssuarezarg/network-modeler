@@ -22,9 +22,20 @@ UK-LD5-R316-RTR1
 UK-LD5-R316-RTR2
 
 # --- Routing policy findings.
-# Uncomment the ones that have been raised. Leaving a finding here that nobody
-# is actually working on is worse than not having the file at all.
 #
-# dangling:<hostname>:<what refers>:<name it refers to>
+# Generate these rather than typing them — one wrong character and the
+# acknowledgement silently stops matching, and the finding alerts again with
+# nothing to explain why:
 #
-# dangling:HK1-L3-SW:route-map static-into-bgp:redistribute-static-into-bgp
+#     docker/run.sh audit --keys >> docker/acknowledged.txt
+#
+# That prints only findings not yet acknowledged, so it is safe to re-run: it
+# appends what is new and nothing else.
+#
+# Read what it appended before committing it. Every line means "this is known
+# and somebody is dealing with it" — a finding parked here that nobody is
+# actually working on is worse than not having the file at all, because it is
+# now invisible and looks handled.
+#
+# Format, for reference:
+#   dangling:<hostname>:<what refers>:<name it refers to>
