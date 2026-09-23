@@ -6,7 +6,7 @@
 # job with an id, a status endpoint, serialisation, history, logs and failure
 # notification; all of that would otherwise have to be built.
 
-stages: [sync]
+stages: [sync, check]
 
 network-config-sync:
   stage: sync
@@ -57,6 +57,45 @@ network-config-sync:
   # docker/acknowledged.txt, not here, or the pipeline goes red every night and
   # people stop looking.
   timeout: 30m
+
+policy-audit:
+  stage: check
+  tags: [netconfig-mirror]
+
+  # Runs in the same pipeline, after the sync, so it inspects the state that run
+  # just produced. Doing it as a separate pipeline triggered by the sync's own
+  # push would work too, and would mean two pipelines per run and a `rules`
+  # entry for `push` — which is the one source deliberately excluded, because
+  # the sync commits to this repository.
+  variables:
+    GIT_STRATEGY: none
+
+  # Same conditions as the sync: this checks what the sync produced.
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "trigger"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "web"
+
+  # Findings already raised belong in the acknowledgement file, which run.sh
+  # mounts. Without that this job is red from its first run — there are known
+  # dangling references in the estate today — and a check that is always red is
+  # a check nobody reads.
+  script:
+    - cd "$MIRROR_TOOL_DIR"
+    - docker/run.sh audit --out-file audit.md
+
+  # The report is downloadable from the job, so no other place to publish it is
+  # needed. It keeps a history of its own alongside the pipeline that produced
+  # it.
+  artifacts:
+    paths: ["$MIRROR_TOOL_DIR/audit.md"]
+    when: always
+    expire_in: 90 days
+
+  # Exit 5 means unacknowledged findings. It should fail the job: that is the
+  # alert. It must not fail the *sync*, which already committed successfully —
+  # hence a separate stage rather than a second command in the same job.
+  allow_failure: false
 
 # NOTE on where this file lives.
 #

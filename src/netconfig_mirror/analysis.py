@@ -178,13 +178,33 @@ class Finding:
     # their parsed hostname is that of the real switch. Grouping a report by
     # hostname merges them and lists every finding twice.
     path: str = ""
+    # The structural parts, kept apart from `detail` so a finding can be
+    # acknowledged by identity rather than by the sentence describing it.
+    source: str = ""      # what refers: "route-map X" or "neighbor 1.2.3.4"
+    target: str = ""      # the name referred to
+    acknowledged: bool = False
+
+    @property
+    def key(self) -> str:
+        """Stable identity for acknowledgement.
+
+        Built from the structural parts, never from `detail`: the rendered
+        sentence carries a "did you mean …?" suggestion that changes as the
+        device's configuration changes, and an acknowledgement keyed on that
+        would silently stop matching — the finding would start alerting again
+        with nothing to explain why.
+        """
+        if self.kind == DANGLING:
+            return f"dangling:{self.hostname}:{self.source}:{self.target}"
+        return f"orphan:{self.hostname}:{self.target}"
 
 
 DANGLING = "route-map matches a prefix-list that does not exist"
 ORPHANED = "prefix-list referenced by nothing"
 
 
-def audit(devices: list[DeviceDoc]) -> list[Finding]:
+def audit(devices: list[DeviceDoc],
+          acknowledged: set[str] | None = None) -> list[Finding]:
     findings: list[Finding] = []
 
     for device in devices:
@@ -208,16 +228,31 @@ def audit(devices: list[DeviceDoc]) -> list[Finding]:
                     name, list(lists), n=1, cutoff=_SIMILAR_ENOUGH)
                 hint = f" (did you mean {suggestion[0]}?)" if suggestion else ""
                 findings.append(Finding(device.hostname, DANGLING,
-                                        f"{where} uses {name}{hint}", device.path))
+                                        f"{where} uses {name}{hint}", device.path,
+                                        source=where, target=name))
 
         for prefix_list in lists.values():
             if not prefix_list.get("referenced_by"):
                 findings.append(Finding(
                     device.hostname, ORPHANED,
                     f"{prefix_list['name']} ({prefix_list.get('entry_count', 0)} entries)",
-                    device.path))
+                    device.path, target=prefix_list["name"]))
+
+    known = acknowledged or set()
+    for finding in findings:
+        finding.acknowledged = finding.key in known
 
     return findings
+
+
+def unacknowledged_dangling(findings: list[Finding]) -> list[Finding]:
+    """Dangling references nobody has taken responsibility for yet.
+
+    What the exit code is about. A check that keeps reporting findings already
+    raised goes red every night, and then nobody reads it — which costs you the
+    next one.
+    """
+    return [f for f in findings if f.kind == DANGLING and not f.acknowledged]
 
 
 def render_audit(findings: list[Finding], devices: list[DeviceDoc],
@@ -225,11 +260,12 @@ def render_audit(findings: list[Finding], devices: list[DeviceDoc],
     dangling = [f for f in findings if f.kind == DANGLING]
     orphaned = [f for f in findings if f.kind == ORPHANED]
 
+    new_dangling = [f for f in dangling if not f.acknowledged]
     lines = [
         f"# Routing policy audit — {len(devices)} device(s)",
         "",
-        f"**{len(dangling)} dangling reference(s), {len(orphaned)} unreferenced "
-        f"prefix-list(s)**",
+        f"**{len(new_dangling)} unacknowledged dangling reference(s)** "
+        f"({len(dangling)} in total, {len(orphaned)} unreferenced prefix-lists)",
         "",
     ]
 
@@ -249,7 +285,8 @@ def render_audit(findings: list[Finding], devices: list[DeviceDoc],
         ]
         for finding in dangling:
             location = finding.path.split("/", 1)[-1] if finding.path else finding.hostname
-            lines.append(f"  {location:<34} {finding.detail}")
+            mark = "  (acknowledged)" if finding.acknowledged else ""
+            lines.append(f"  {location:<34} {finding.detail}{mark}")
     else:
         lines.append("  None.")
     lines.append("")

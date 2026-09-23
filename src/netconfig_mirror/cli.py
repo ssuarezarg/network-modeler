@@ -554,7 +554,9 @@ def cmd_compare(args: argparse.Namespace) -> int:
 def cmd_audit(args: argparse.Namespace) -> int:
     """Policy that cannot do what it appears to do, across the whole mirror."""
     devices = analysis.load_devices(args.repo)
-    findings = analysis.audit(devices)
+    acknowledged = (batchlib.load_acknowledged(args.ack_file)
+                    if args.ack_file else set())
+    findings = analysis.audit(devices, acknowledged)
     report = analysis.render_audit(findings, devices, full=args.full)
 
     if args.out_file:
@@ -563,9 +565,21 @@ def cmd_audit(args: argparse.Namespace) -> int:
     else:
         print(report)
 
-    # A dangling reference is a live misconfiguration, not an observation.
-    dangling = [f for f in findings if f.kind == analysis.DANGLING]
-    return EXIT_BATCH_ATTENTION if dangling else EXIT_OK
+    # A dangling reference is a live misconfiguration, not an observation — but
+    # only the ones nobody has taken responsibility for yet set the exit code.
+    # Twenty-seven known findings would otherwise fail every scheduled run from
+    # the first day, and a check that is always red is a check nobody reads.
+    outstanding = analysis.unacknowledged_dangling(findings)
+    if outstanding:
+        print(f"\n{len(outstanding)} unacknowledged dangling reference(s). "
+              f"Once raised, add their keys to the acknowledgement file:",
+              file=sys.stderr)
+        for finding in outstanding[:10]:
+            print(f"  {finding.key}", file=sys.stderr)
+        if len(outstanding) > 10:
+            print(f"  ... and {len(outstanding) - 10} more", file=sys.stderr)
+        return EXIT_BATCH_ATTENTION
+    return EXIT_OK
 
 
 def _sync_composite(repo, capture, captures, key: bytes,
@@ -760,6 +774,9 @@ def main(argv: list[str] | None = None) -> int:
         "audit", help="find routing policy that cannot do what it appears to do")
     policy_audit.add_argument("--repo", required=True, help="path to the mirror repository")
     policy_audit.add_argument("--out-file", help="write the report here instead of stdout")
+    policy_audit.add_argument("--ack-file", default=None,
+                              help="findings already raised; they stay in the report "
+                                   "but stop setting the exit code")
     policy_audit.add_argument("--full", action="store_true",
                               help="list every unreferenced prefix-list instead of a sample")
     policy_audit.add_argument("--env-file", default=None, help=argparse.SUPPRESS)

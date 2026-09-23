@@ -199,6 +199,10 @@ netconfig-mirror audit --repo ./mirror
 netconfig-mirror compare CORE-RTR-01 CORE-RTR-02 --repo ./mirror
 ```
 
+```bash
+netconfig-mirror audit --repo ./mirror --ack-file ./acknowledged.txt
+```
+
 `audit` looks for routing policy that cannot do what it appears to do:
 
 - **Route-maps matching a prefix-list that does not exist.** The one worth
@@ -206,7 +210,13 @@ netconfig-mirror compare CORE-RTR-01 CORE-RTR-02 --repo ./mirror
   nothing, so the policy the engineer believed they applied was never applied,
   and nothing anywhere reports it. Exits 5 when any are found.
 - **Prefix-lists nothing references.** Inert entries that filter and announce
-  nothing, usually left by a change that was never finished.
+  nothing, usually left by a change that was never finished. Informational —
+  they do not affect the exit code.
+
+Findings already raised go in the acknowledgement file, keyed by device, what
+refers and what it refers to. They stay in the report and stop setting the exit
+code, so a scheduled run is quiet until something new appears. Without it the
+check is red from its first run and nobody reads it after a fortnight.
 
 `compare` puts two devices side by side. A redundant pair is *supposed* to
 differ — different loopbacks, different peering addresses, deliberate traffic

@@ -257,6 +257,24 @@ summary and stop setting the attention exit code, so a scheduled run is quiet
 until something *new* goes wrong. An alert that fires every night gets muted,
 and then it costs you the one that matters.
 
+The file takes two kinds of entry, which do not collide:
+
+```
+UK-LD5-R316-RTR1                                  # a device's collection failure
+dangling:HK1-L3-SW:route-map static-into-bgp:redistribute-static-into-bgp
+```
+
+`audit` prints the key of every unacknowledged finding when it exits non-zero,
+so they are copied rather than typed. A key is built from the structural parts —
+device, what refers, what it refers to — and never from the sentence describing
+the finding, because that sentence carries a "did you mean …?" suggestion that
+changes as the device changes. An acknowledgement keyed on the sentence would
+silently stop matching, and the finding would start alerting again with nothing
+to explain why.
+
+The key carries the hostname, so acknowledging a finding on one device does not
+cover the same mistake on another — which is right: it needs fixing there too.
+
 ---
 
 ## What it deliberately does not do

@@ -69,8 +69,8 @@ case "$SUBCOMMAND" in
   inventory|volatile)
              EXTRA=(--env-file /secrets/db.env) ;;
   # Read the mirror only: no database, no key.
-  compare|audit)
-             EXTRA=(--repo /mirror) ;;
+  compare) EXTRA=(--repo /mirror) ;;
+  audit)   EXTRA=(--repo /mirror) ;;
   *)         EXTRA=() ;;
 esac
 
@@ -78,7 +78,7 @@ ACK_MOUNT=""
 if [[ -f "$ACK_FILE" ]]; then
   ACK_MOUNT="-v $ACK_FILE:/secrets/acknowledged.txt:ro"
   case "$SUBCOMMAND" in
-    sync|batch) EXTRA+=(--ack-file /secrets/acknowledged.txt) ;;
+    sync|batch|audit) EXTRA+=(--ack-file /secrets/acknowledged.txt) ;;
   esac
 fi
 

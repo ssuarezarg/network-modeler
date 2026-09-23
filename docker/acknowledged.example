@@ -1,14 +1,30 @@
-# Hostnames whose failure is already known and accepted. They still appear in
-# every run's summary; they simply stop setting the "needs attention" exit code,
-# so a scheduled run stays silent until something NEW goes wrong.
+# Findings already raised with whoever can fix them. They stay in every report;
+# they simply stop setting the "needs attention" exit code, so a scheduled run
+# is quiet until something NEW goes wrong.
 #
-# Acknowledge a device only after the problem has been raised with whoever can
-# fix it. This file is a record of "we know, it is being handled" — not a place
-# to hide findings.
+# An alert that fires every night gets muted, and then it costs you the one that
+# matters. This file is what keeps that from happening — and it is a record of
+# "we know, it is being handled", not a place to hide findings.
 #
-# Copy to acknowledged.txt and edit.
+# Copy to acknowledged.txt and edit. Two kinds of entry, and they do not
+# collide:
+#
+#   1. A hostname          — that device's collection failure is known
+#   2. A finding key       — that specific policy finding is known
+#
+# Finding keys are printed by `netconfig-mirror audit` when it exits non-zero;
+# copy them from there rather than typing them.
 
-# Store 65-byte error strings instead of configurations. The collector reports
-# these as successfully collected. Raised with the collector team 2026-09-12.
+# --- Devices storing a 65-byte error string instead of a configuration.
+# The collector reports these as successfully collected.
+# Raised with the collector team 2026-09-12.
 UK-LD5-R316-RTR1
 UK-LD5-R316-RTR2
+
+# --- Routing policy findings.
+# Uncomment the ones that have been raised. Leaving a finding here that nobody
+# is actually working on is worse than not having the file at all.
+#
+# dangling:<hostname>:<what refers>:<name it refers to>
+#
+# dangling:HK1-L3-SW:route-map static-into-bgp:redistribute-static-into-bgp

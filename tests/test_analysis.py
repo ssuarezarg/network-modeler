@@ -190,3 +190,59 @@ def test_the_report_warns_that_a_dangling_name_may_be_a_parser_gap(tmp_path):
     })
     out = render_audit(audit(devices), devices)
     assert "raw.cfg" in out and "parser" in out
+
+
+def test_a_finding_key_ignores_the_suggestion_text(tmp_path):
+    """The key is built from the structural parts, never from the rendered
+    sentence: the "did you mean …?" hint changes as the device changes, and an
+    acknowledgement keyed on it would silently stop matching."""
+    devices = _mirror(tmp_path, {
+        "r1": {"device": {"hostname": "r1"},
+               "prefix_lists": [_pl("BP_Plano_in_in", ["10.0.0.0/8"])],
+               "route_maps": [{"name": "RM", "prefix_lists": ["BP_Plano_in"]}]},
+    })
+    finding = [f for f in audit(devices) if f.kind == DANGLING][0]
+    assert finding.key == "dangling:r1:route-map RM:BP_Plano_in"
+    assert "did you mean" in finding.detail
+    assert "did you mean" not in finding.key
+
+
+def test_an_acknowledged_finding_stays_in_the_report(tmp_path):
+    devices = _mirror(tmp_path, {
+        "r1": {"device": {"hostname": "r1"},
+               "route_maps": [{"name": "RM", "prefix_lists": ["MISSING"]}]},
+    })
+    key = "dangling:r1:route-map RM:MISSING"
+    findings = audit(devices, {key})
+    assert findings[0].acknowledged
+    out = render_audit(findings, devices)
+    assert "MISSING" in out and "acknowledged" in out
+
+
+def test_only_unacknowledged_findings_drive_the_exit_code(tmp_path):
+    """Twenty-seven known findings would otherwise fail every scheduled run from
+    the first day, and a check that is always red is a check nobody reads."""
+    from netconfig_mirror.analysis import unacknowledged_dangling
+
+    devices = _mirror(tmp_path, {
+        "r1": {"device": {"hostname": "r1"},
+               "route_maps": [{"name": "RM", "prefix_lists": ["MISSING"]},
+                              {"name": "RM2", "prefix_lists": ["ALSO_MISSING"]}]},
+    })
+    findings = audit(devices, {"dangling:r1:route-map RM:MISSING"})
+    outstanding = unacknowledged_dangling(findings)
+    assert [f.target for f in outstanding] == ["ALSO_MISSING"]
+
+
+def test_acknowledging_one_device_does_not_cover_the_same_name_elsewhere(tmp_path):
+    """The key carries the hostname, so the same mistake on a second device is
+    a separate finding — which is right: it needs fixing there too."""
+    doc = {"route_maps": [{"name": "RM", "prefix_lists": ["MISSING"]}]}
+    devices = _mirror(tmp_path, {
+        "r1": {"device": {"hostname": "r1"}, **doc},
+        "r2": {"device": {"hostname": "r2"}, **doc},
+    })
+    from netconfig_mirror.analysis import unacknowledged_dangling
+
+    findings = audit(devices, {"dangling:r1:route-map RM:MISSING"})
+    assert [f.hostname for f in unacknowledged_dangling(findings)] == ["r2"]
