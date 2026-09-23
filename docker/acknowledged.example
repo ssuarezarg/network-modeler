@@ -15,6 +15,11 @@
 # Finding keys are printed by `netconfig-mirror audit` when it exits non-zero;
 # copy them from there rather than typing them.
 
+# Say where each group was raised and when. A suppression file with no dates
+# and no reference is indistinguishable from one where things were swept under
+# the carpet — and whoever opens it in six months needs somewhere to go to find
+# out what happened.
+
 # --- Devices storing a 65-byte error string instead of a configuration.
 # The collector reports these as successfully collected.
 # Raised with the collector team 2026-09-12.
@@ -39,3 +44,5 @@ UK-LD5-R316-RTR2
 #
 # Format, for reference:
 #   dangling:<hostname>:<what refers>:<name it refers to>
+#
+# Raised in <report>, <date>. Update this line when the status changes.
