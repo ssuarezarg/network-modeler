@@ -262,10 +262,20 @@ would look valid.
 ## Running it in a container
 
 ```bash
-docker build -t netconfig-mirror:0.1.0 .
 docker/run.sh inventory
 docker/run.sh sync --push
 ```
+
+**No build step.** The image is tagged with the commit it was built from, and
+`run.sh` builds it the first time it sees a new one. Updating the code otherwise
+does not update what runs: `git pull` changes the checkout, the container keeps
+the old code, and a fix appears not to work with nothing saying why. A modified
+working tree gets its own `-dirty` tag, so local edits are never run from a
+stale image either.
+
+One image accumulates per commit you actually run. `docker image prune` does not
+remove them, since they are tagged; clear old ones with
+`docker images netconfig-mirror -q | tail -n +5 | xargs -r docker rmi`.
 
 The image holds the installed tool and no source, no configuration and no
 secrets. The HMAC key, the database settings and the SSH key used to push are

@@ -189,6 +189,10 @@ continuing.
 
 **the project → Build → Pipelines → Run pipeline**, on `main`.
 
+The job does not build the image: `run.sh` tags it with the commit it was built
+from and builds on first sight of a new one, so what runs always matches the
+checkout. The first run after an update therefore takes a minute longer.
+
 **Check 5** — the job goes green, and:
 
 ```bash

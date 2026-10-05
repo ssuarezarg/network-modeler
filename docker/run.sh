@@ -23,7 +23,27 @@
 # that says nothing about the real mistake.
 set -euo pipefail
 
-IMAGE="${IMAGE:-netconfig-mirror:0.1.0}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TOOL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Tag the image with the commit it was built from, and build it on demand.
+#
+# Updating the code does not update what runs: `git pull` changes the checkout,
+# the container keeps the old code, and the fix appears not to work with nothing
+# saying why. Deriving the tag from the checkout makes that impossible — a
+# different commit is a different tag, and a tag that does not exist yet is
+# built before the run.
+#
+# A modified working tree gets its own `-dirty` tag, so local edits are never
+# silently run from a stale image either. The layer cache keeps the rebuild
+# quick when only source changed.
+if [[ -z "${IMAGE:-}" ]]; then
+  revision="$(git -C "$TOOL_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+  if [[ -n "$(git -C "$TOOL_DIR" status --porcelain 2>/dev/null)" ]]; then
+    revision="${revision}-dirty"
+  fi
+  IMAGE="netconfig-mirror:${revision}"
+fi
 REPO="${REPO:-$HOME/modeler/mirror}"
 KEY_FILE="${KEY_FILE:-$HOME/.netconfig-mirror.key}"
 ENV_FILE="${ENV_FILE:-$HOME/modeler/dt_model/.env}"
@@ -33,7 +53,6 @@ KNOWN_HOSTS="${KNOWN_HOSTS:-$HOME/.ssh/known_hosts}"
 # docker/acknowledged.example. Mounted rather than passed as a path, because a
 # host path handed to --ack-file does not exist inside the container - the file
 # is then silently absent and every known-bad device demands attention again.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ACK_FILE="${ACK_FILE:-$SCRIPT_DIR/acknowledged.txt}"
 
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
@@ -80,6 +99,11 @@ if [[ -f "$ACK_FILE" ]]; then
   case "$SUBCOMMAND" in
     sync|batch|audit) EXTRA+=(--ack-file /secrets/acknowledged.txt) ;;
   esac
+fi
+
+if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+  printf 'building %s (first run for this commit)\n' "$IMAGE" >&2
+  docker build -t "$IMAGE" "$TOOL_DIR" >&2 || die "build failed"
 fi
 
 # --network host so the container reaches the database VM and GitLab exactly as
