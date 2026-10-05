@@ -551,6 +551,25 @@ def cmd_compare(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _write_report(path: str, content: str) -> int:
+    """Write a report, explaining the one failure that is not obvious.
+
+    The container runs read-only apart from its mounts, so an output path
+    outside them fails with a bare `OSError: Read-only file system` naming only
+    the file. Redirecting stdout costs nothing and always works, so say so.
+    """
+    try:
+        Path(path).write_text(content, encoding="utf-8")
+    except OSError as error:
+        print(f"Could not write {path}: {error}", file=sys.stderr)
+        print("\nInside the container only the mounted repository and /tmp are "
+              "writable.\nEither write under one of those, or redirect instead:"
+              "\n\n    docker/run.sh <command> > report.md\n", file=sys.stderr)
+        return EXIT_REPO
+    print(f"wrote {path}")
+    return EXIT_OK
+
+
 def cmd_audit(args: argparse.Namespace) -> int:
     """Policy that cannot do what it appears to do, across the whole mirror."""
     devices = analysis.load_devices(args.repo)
@@ -569,8 +588,9 @@ def cmd_audit(args: argparse.Namespace) -> int:
     report = analysis.render_audit(findings, devices, full=args.full)
 
     if args.out_file:
-        Path(args.out_file).write_text(report, encoding="utf-8")
-        print(f"wrote {args.out_file}")
+        written = _write_report(args.out_file, report)
+        if written != EXIT_OK:
+            return written
     else:
         print(report)
 
@@ -700,10 +720,8 @@ def cmd_inventory(args: argparse.Namespace) -> int:
 
     rendered = inventory.render(survey)
     if args.out_file:
-        Path(args.out_file).write_text(rendered, encoding="utf-8")
-        print(f"wrote {args.out_file}")
-    else:
-        print(rendered)
+        return _write_report(args.out_file, rendered)
+    print(rendered)
     return EXIT_OK
 
 

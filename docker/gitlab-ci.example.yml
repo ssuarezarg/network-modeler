@@ -80,15 +80,25 @@ policy-audit:
   # mounts. Without that this job is red from its first run — there are known
   # dangling references in the estate today — and a check that is always red is
   # a check nobody reads.
+  # The report is captured by redirecting stdout, not with --out-file. The
+  # container runs read-only on purpose, so it cannot write into its working
+  # directory; the redirection happens in the job's own shell, which can.
+  #
+  # It must land under $CI_PROJECT_DIR: artifact paths are resolved relative to
+  # the project directory, and the script runs from $MIRROR_TOOL_DIR, which is
+  # outside it. Writing it beside the tool gets "artifact path is not a subpath
+  # of project directory" and nothing is uploaded.
   script:
     - cd "$MIRROR_TOOL_DIR"
-    - docker/run.sh audit --out-file audit.md
+    - docker/run.sh audit > "$CI_PROJECT_DIR/audit.md"
 
   # The report is downloadable from the job, so no other place to publish it is
   # needed. It keeps a history of its own alongside the pipeline that produced
   # it.
+  # `when: always` so the report is still published when the job fails — which
+  # is exactly when somebody wants to read it.
   artifacts:
-    paths: ["$MIRROR_TOOL_DIR/audit.md"]
+    paths: [audit.md]
     when: always
     expire_in: 90 days
 
