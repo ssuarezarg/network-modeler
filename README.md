@@ -287,6 +287,15 @@ Database credentials are mounted as a file and read by the tool's own
 `--env-file`, not passed with Docker's: Docker's copies them into the container
 environment, where `docker inspect` shows them.
 
+The container is read-only apart from a tmpfs `/tmp`, so anything `device` or
+`file` writes is discarded when it exits. That is the right default for a
+nightly `sync`, and wrong when you are examining a platform that has no parser
+yet and the saved capture is the whole point. Mount a directory for it:
+
+```bash
+OUT_DIR=~/asa-survey docker/run.sh device <hostname> --out /out
+```
+
 Because the build stage is separate, moving to shipping a prebuilt image later
 changes only where `docker build` runs — the artefact is the same.
 

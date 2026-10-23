@@ -54,6 +54,11 @@ KNOWN_HOSTS="${KNOWN_HOSTS:-$HOME/.ssh/known_hosts}"
 # host path handed to --ack-file does not exist inside the container - the file
 # is then silently absent and every known-bad device demands attention again.
 ACK_FILE="${ACK_FILE:-$SCRIPT_DIR/acknowledged.txt}"
+# Optional. The container is read-only with nothing but a tmpfs /tmp, so
+# anything `device` or `file` writes is gone the moment it exits - which is
+# exactly the output you need when inspecting a platform that has no parser
+# yet. Set OUT_DIR to a host directory and pass `--out /out`.
+OUT_DIR="${OUT_DIR:-}"
 
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
@@ -93,6 +98,13 @@ case "$SUBCOMMAND" in
   *)         EXTRA=() ;;
 esac
 
+OUT_MOUNT=""
+if [[ -n "$OUT_DIR" ]]; then
+  absolute "OUT_DIR" "$OUT_DIR"
+  mkdir -p "$OUT_DIR" || die "cannot create OUT_DIR=$OUT_DIR"
+  OUT_MOUNT="-v $OUT_DIR:/out"
+fi
+
 ACK_MOUNT=""
 if [[ -f "$ACK_FILE" ]]; then
   ACK_MOUNT="-v $ACK_FILE:/secrets/acknowledged.txt:ro"
@@ -121,6 +133,7 @@ exec docker run --rm \
   -v "$KNOWN_HOSTS:/secrets/known_hosts:ro" \
   -v /etc/passwd:/etc/passwd:ro \
   ${ACK_MOUNT} \
+  ${OUT_MOUNT} \
   -e HOME=/tmp \
   -e GIT_SSH_COMMAND="ssh -i /secrets/ssh_key -o IdentitiesOnly=yes -o UserKnownHostsFile=/secrets/known_hosts" \
   -e GIT_AUTHOR_NAME=netconfig-mirror \
