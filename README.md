@@ -329,6 +329,25 @@ The split that matters: **trigger a pipeline to refresh, read files to query.**
 A pipeline is a job, not a query — everything the mirror knows is already sitting
 in the repository as files that GitLab serves directly.
 
+## When a capture is not a configuration
+
+Collectors store their own failures where a configuration should be. Two shapes
+appear, reported separately because different people fix them:
+
+- **`capture too small`** — a few bytes that are not a configuration and not
+  recognisably an error either.
+- **`collector recorded an error`** — the stored text is the collector's own
+  failure message, and its first line is quoted in the run output. One real
+  example reads `Pattern not detected: 'WCS-DAL3-ASA1#'`, which names the
+  device, the cause and the fix without anyone querying the database.
+
+Neither is handed to the parser. Doing so would surface as "platform unknown",
+reading like an unsupported device rather than a collection that failed.
+
+Such a device usually has no hostname either — the collector never parsed a
+configuration to learn one — so it is reported by its address, and only by its
+database id when there is nothing else.
+
 ## Exit codes
 
 | Code | Meaning |

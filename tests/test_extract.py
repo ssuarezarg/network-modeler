@@ -129,3 +129,18 @@ def test_collector_id_filter_is_optional_but_explicit():
     from netconfig_mirror.extract import LATEST_PER_DEVICE
 
     assert "%(collector_id)s::text IS NULL OR" in LATEST_PER_DEVICE
+
+
+def test_a_device_without_a_hostname_is_labelled_by_its_address():
+    """The collector could not identify this device, so hostname is NULL. An
+    address is something an engineer can act on; a UUID sends them to the
+    database to find out what it even is."""
+    capture = _capture(hostname=None)
+    capture = CapturedConfig(**{**capture.__dict__, "ip_address": "100.83.49.92"})
+    assert capture.label == "100.83.49.92"
+    assert capture.device_key == "100-83-49-92"
+
+
+def test_the_uuid_is_only_the_last_resort():
+    capture = _capture(hostname=None)
+    assert capture.label == capture.device_id

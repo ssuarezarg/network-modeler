@@ -305,16 +305,16 @@ def _matches(capture, args) -> bool:
 def _model_one(capture, key: bytes, args, collisions) -> "batchlib.DeviceResult":
     site = layout.site_of(capture)
     result = batchlib.DeviceResult(
-        hostname=capture.hostname or capture.device_id,
+        hostname=capture.label,
         site=site,
         outcome=batchlib.OK,
         device_id=capture.device_id,
         collected_at=capture.collected_at,
     )
 
-    attempt, detail = batchlib.should_attempt(capture)
+    attempt, detail, outcome = batchlib.should_attempt(capture)
     if not attempt:
-        result.outcome, result.detail = batchlib.TOO_SMALL, detail
+        result.outcome, result.detail = outcome, detail
         return result
 
     try:
@@ -481,14 +481,14 @@ def cmd_sync(args: argparse.Namespace) -> int:
 def _sync_one(repo, capture, key: bytes, args, relative: str,
               sync: "gitops.SyncReport") -> "batchlib.DeviceResult":
     result = batchlib.DeviceResult(
-        hostname=capture.hostname or capture.device_id,
+        hostname=capture.label,
         site=layout.site_of(capture), outcome=batchlib.OK,
         device_id=capture.device_id, collected_at=capture.collected_at,
         path=relative)
 
-    attempt, detail = batchlib.should_attempt(capture)
+    attempt, detail, outcome = batchlib.should_attempt(capture)
     if not attempt:
-        result.outcome, result.detail = batchlib.TOO_SMALL, detail
+        result.outcome, result.detail = outcome, detail
         return result
 
     try:
@@ -616,7 +616,7 @@ def _sync_composite(repo, capture, captures, key: bytes,
     """Mirror one device whose configuration is several JSON endpoints."""
     relative = layout.device_path(capture)
     result = batchlib.DeviceResult(
-        hostname=capture.hostname or capture.device_id,
+        hostname=capture.label,
         site=layout.site_of(capture), outcome=batchlib.MIRRORED,
         platform="firepower", device_id=capture.device_id,
         collected_at=capture.collected_at, path=relative)

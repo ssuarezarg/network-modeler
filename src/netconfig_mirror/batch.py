@@ -14,6 +14,7 @@ Built for cron, which shapes every decision here:
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
@@ -27,6 +28,10 @@ OK = "ok"
 # the coverage figures — there is no coverage to report for it.
 MIRRORED = "mirrored (json, no model)"
 TOO_SMALL = "capture too small"
+# The collector stored its own error message where a configuration should be.
+# Worth its own outcome: "too small" says the data is wrong, this says who can
+# fix it and usually why.
+COLLECTOR_ERROR = "collector recorded an error"
 NO_PARSER = "no parser"
 REDACTION_REFUSED = "redaction refused"
 ERROR = "error"
@@ -34,7 +39,8 @@ ERROR = "error"
 # Order in which outcomes are reported: worst first, because a redaction refusal
 # is a credential exposure upstream and should not be read after a list of
 # routine skips.
-OUTCOME_ORDER = [REDACTION_REFUSED, ERROR, TOO_SMALL, NO_PARSER, MIRRORED, OK]
+OUTCOME_ORDER = [REDACTION_REFUSED, ERROR, COLLECTOR_ERROR, TOO_SMALL,
+                 NO_PARSER, MIRRORED, OK]
 
 
 @dataclass
@@ -96,7 +102,8 @@ class BatchReport:
         is per device, not blanket.
         """
         for result in self.results:
-            if result.outcome in (REDACTION_REFUSED, ERROR, TOO_SMALL):
+            if result.outcome in (REDACTION_REFUSED, ERROR, TOO_SMALL,
+                                  COLLECTOR_ERROR):
                 if result.hostname not in self.acknowledged:
                     return True
         return False
@@ -116,17 +123,36 @@ class BatchReport:
         }
 
 
-def should_attempt(capture: CapturedConfig) -> tuple[bool, str | None]:
+# A stored capture that is really the collector's own error. Recognised so the
+# report can say who fixes it, and quote the reason, instead of only reporting
+# a size.
+_COLLECTOR_ERROR = re.compile(
+    r"^\s*(?:ERROR|Traceback|Authentication fail|.*Pattern not detected"
+    r"|.*timed[- ]out|.*Unable to connect|.*Connection refused)", re.I)
+
+
+def should_attempt(capture: CapturedConfig) -> tuple[bool, str | None, str]:
     """Whether this capture is worth trying to model.
 
     A capture far too small to be a configuration is reported as its own
     outcome rather than being handed to the parser, where it would surface as
     'platform unknown' and read like an unsupported device instead of a
     collector fault.
+
+    When that text is recognisably the collector's own error, say so and quote
+    its first line. The difference matters to whoever reads the run: "294 bytes"
+    sends them to the database to find out what happened, while "Pattern not
+    detected: 'WCS-DAL3-ASA1#'" tells them the device, the cause and the fix.
     """
-    if len(capture.output) < SUSPICIOUS_CAPTURE_BYTES:
-        return False, f"{len(capture.output)} bytes"
-    return True, None
+    if len(capture.output) >= SUSPICIOUS_CAPTURE_BYTES:
+        return True, None, OK
+
+    first_line = capture.output.strip().splitlines()[0] if capture.output.strip() else ""
+    if _COLLECTOR_ERROR.match(capture.output.strip()):
+        # First line only, and capped: the rest is Netmiko's suggestions, and a
+        # failure message is not somewhere to go looking for secrets.
+        return False, first_line[:160], COLLECTOR_ERROR
+    return False, f"{len(capture.output)} bytes", TOO_SMALL
 
 
 def render_summary(report: BatchReport) -> str:
@@ -159,7 +185,7 @@ def render_summary(report: BatchReport) -> str:
                                                  or timezone.utc)).days
             lines.append(f"  {result.hostname:<24} {age:>4}d")
 
-    for outcome in (REDACTION_REFUSED, ERROR, TOO_SMALL):
+    for outcome in (REDACTION_REFUSED, ERROR, COLLECTOR_ERROR, TOO_SMALL):
         affected = [r for r in report.results if r.outcome == outcome]
         if affected:
             lines += ["", f"{outcome}:"]

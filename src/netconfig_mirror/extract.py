@@ -86,7 +86,7 @@ def all_config_commands(*, include_startup: bool = False) -> list[str]:
 LATEST_PER_DEVICE = """
 SELECT DISTINCT ON (r.device_id, r.command)
        r.id, r.device_id, r.command, r.output, r.collected_at,
-       d.hostname, d.vendor, d.os_version, d.device_type,
+       d.hostname, d.ip_address, d.vendor, d.os_version, d.device_type,
        d.serial_number, d.role, d.location, d.collector_id
   FROM raw_outputs r
   JOIN devices d ON d.id = r.device_id
@@ -99,7 +99,7 @@ SELECT DISTINCT ON (r.device_id, r.command)
 # subtract a margin before passing `since`.
 SINCE_WATERMARK = """
 SELECT r.id, r.device_id, r.command, r.output, r.collected_at,
-       d.hostname, d.vendor, d.os_version, d.device_type,
+       d.hostname, d.ip_address, d.vendor, d.os_version, d.device_type,
        d.serial_number, d.role, d.location, d.collector_id
   FROM raw_outputs r
   JOIN devices d ON d.id = r.device_id
@@ -119,7 +119,7 @@ SELECT r.id, r.device_id, r.command, r.output, r.collected_at,
 LATEST_BY_HOSTNAME = """
 SELECT DISTINCT ON (r.device_id)
        r.id, r.device_id, r.command, r.output, r.collected_at,
-       d.hostname, d.vendor, d.os_version, d.device_type,
+       d.hostname, d.ip_address, d.vendor, d.os_version, d.device_type,
        d.serial_number, d.role, d.location, d.collector_id
   FROM raw_outputs r
   JOIN devices d ON d.id = r.device_id
@@ -156,7 +156,7 @@ SELECT d.hostname, d.collector_id
 LATEST_COMPOSITE = """
 SELECT DISTINCT ON (r.device_id, r.command)
        r.id, r.device_id, r.command, r.output, r.collected_at,
-       d.hostname, d.vendor, d.os_version, d.device_type,
+       d.hostname, d.ip_address, d.vendor, d.os_version, d.device_type,
        d.serial_number, d.role, d.location, d.collector_id
   FROM raw_outputs r
   JOIN devices d ON d.id = r.device_id
@@ -212,6 +212,9 @@ class CapturedConfig:
     role: str | None
     location: str | None
     collector_id: str | None
+    # Last, with a default, so every existing construction keeps working. The
+    # database always supplies it; only hand-built captures leave it out.
+    ip_address: str | None = None
 
     @property
     def device_key(self) -> str:
@@ -226,7 +229,16 @@ class CapturedConfig:
         """
         if self.hostname:
             return slugify(self.hostname)
+        # A device the collector never identified still has an address, and an
+        # address is something an engineer can act on. A UUID is not.
+        if self.ip_address:
+            return slugify(self.ip_address)
         return f"device-{self.device_id}"
+
+    @property
+    def label(self) -> str:
+        """What to call this device in a report."""
+        return self.hostname or self.ip_address or self.device_id
 
     @property
     def site_key(self) -> str:

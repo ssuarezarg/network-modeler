@@ -20,6 +20,9 @@
 # the carpet — and whoever opens it in six months needs somewhere to go to find
 # out what happened.
 
+# A device is acknowledged by the name the run reports for it: its hostname,
+# or its address when the collector never identified it.
+
 # --- Devices storing a 65-byte error string instead of a configuration.
 # The collector reports these as successfully collected.
 # Raised with the collector team 2026-09-12.

@@ -33,13 +33,44 @@ def test_a_tiny_capture_is_its_own_outcome_not_a_parser_failure():
     """A 65-byte error string handed to the parser surfaces as 'platform
     unknown', which reads like an unsupported device rather than a collector
     fault. They need different people to act."""
-    attempt, detail = should_attempt(_capture("% Invalid input detected\n"))
+    attempt, detail, outcome = should_attempt(_capture("% Invalid input detected\n"))
     assert not attempt
     assert "bytes" in detail
+    assert outcome == TOO_SMALL
 
 
-def test_a_real_configuration_is_attempted():
-    assert should_attempt(_capture("hostname r1\n" * 500))[0]
+def test_a_stored_collector_error_is_named_and_quoted():
+    """The collector stores its own failures where a configuration should be.
+    "294 bytes" sends whoever reads the run to the database to find out what
+    happened; the first line of the error tells them the device, the cause and
+    the fix."""
+    from netconfig_mirror.batch import COLLECTOR_ERROR
+
+    output = ("ERROR: \nPattern not detected: 'WCS-DAL3-ASA1#' in output.\n\n"
+              "Things you might try to fix this:\n"
+              "1. Explicitly set your pattern using the expect_string argument.\n")
+    attempt, detail, outcome = should_attempt(_capture(output))
+    assert not attempt
+    assert outcome == COLLECTOR_ERROR
+    assert detail.startswith("ERROR")
+
+
+def test_only_the_first_line_of_an_error_is_quoted():
+    """A failure message is not somewhere to go looking for secrets, and the
+    rest is the library's own suggestions."""
+    attempt, detail, _ = should_attempt(
+        _capture("ERROR: connection failed\nuser=admin password=hunter2\n"))
+    assert not attempt
+    assert "hunter2" not in detail
+
+
+def test_a_real_configuration_is_not_mistaken_for_an_error():
+    attempt, _, outcome = should_attempt(_capture("hostname r1\n" * 500))
+    assert attempt
+    assert outcome == OK
+
+
+
 
 
 def test_known_platform_gaps_do_not_demand_attention():
