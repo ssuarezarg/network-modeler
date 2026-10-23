@@ -121,6 +121,13 @@ _RULES: list[tuple[str, re.Pattern[str]]] = [
     # ASA trailing-keyword form: `... password <value> encrypted`
     ("asa-encrypted", re.compile(
         r"(?P<pre>\bpassword\s+)(?P<secret>\S+)(?=\s+encrypted\b)", re.M | re.I)),
+    # ASA's login password, spelled `passwd` and not `password`:
+    #     passwd <value> encrypted
+    # The viewer's sanitiser masks `enable password` on the same device and
+    # leaves this one in cleartext. Found on the first clean run against the
+    # estate, by the widened net rather than by any rule.
+    ("asa-passwd", re.compile(
+        r"(?P<pre>^\s*passwd\s+)(?P<secret>\S+)", re.M | re.I)),
     ("ldap", re.compile(
         r"(?P<pre>^\s*ldap-login-password\s+)(?P<secret>\S+)", re.M | re.I)),
     # Interface and protocol authentication. These are not exotic: they sit on

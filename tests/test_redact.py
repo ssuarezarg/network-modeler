@@ -274,3 +274,14 @@ def test_an_snmp_trap_receiver_community_is_a_credential():
 
     assert "TrapString" not in out
     assert report.counts.get("snmp-host-community") == 1
+
+
+def test_the_asa_spells_its_login_password_passwd():
+    """`passwd <value> encrypted`. The viewer's sanitiser masks `enable
+    password` on the same device and leaves this one in cleartext, so this
+    rule is the only thing between it and the mirror."""
+    out, report = redact("passwd SomeLoginValue01 encrypted\n", KEY)
+
+    assert "SomeLoginValue01" not in out
+    assert report.counts.get("asa-passwd") == 1
+    assert not audit_residuals(out)
