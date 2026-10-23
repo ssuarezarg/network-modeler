@@ -29,6 +29,20 @@ Known limitation: the token covers the *stored ciphertext*, not the underlying
 password. Cisco type 7/8/9 are salted, so re-entering the same password produces
 different ciphertext and therefore a new token. That reads as a change in the
 diff, which is the safe direction to be wrong in.
+**This layer has never fired in production.** Across 71 devices the mirror
+holds zero `<redacted:` tokens: every credential in the estate arrives already
+masked as `[OMITTED_BY_SANITIZER]` by the viewer database's own sanitiser. So
+the protection that is actually working is upstream, and this is a net that
+has never caught anything.
+
+That is exactly why it could be broken without anyone noticing - six credential
+spellings were leaking in cleartext, found only by firing synthetic credentials
+at it. Two consequences worth keeping in mind. Its correctness can only ever be
+established by tests, never by a clean run against the estate; a clean run
+proves nothing, because nothing reaches it. And the day the viewer stops
+sanitising, or the mirror is pointed at a source that never did, this becomes
+the only thing between a running-config and a Git repository.
+
 """
 from __future__ import annotations
 
