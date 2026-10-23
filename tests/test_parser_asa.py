@@ -68,7 +68,7 @@ interface Tunnel1
  nameif aws-tunnel-1
  ip address 169.254.10.2 255.255.255.252
  tunnel source interface outside
- tunnel destination 198.51.100.200
+ tunnel destination 198.51.100.201
  tunnel mode ipsec ipv4
  tunnel protection ipsec profile ipsec-vpn-aws-0
 crypto ipsec profile ipsec-vpn-aws-0
@@ -221,7 +221,7 @@ def test_a_route_based_tunnel_keeps_its_vpn_configuration():
     tunnel = [i for i in _model().interfaces if i.name == "Tunnel1"][0]
 
     assert tunnel.tunnel_source == "interface outside"
-    assert tunnel.tunnel_destination == "198.51.100.200"
+    assert tunnel.tunnel_destination == "198.51.100.201"
     assert tunnel.tunnel_mode == "ipsec ipv4"
     assert tunnel.tunnel_protection == "ipsec-vpn-aws-0"
 
@@ -239,3 +239,16 @@ def test_a_profile_no_tunnel_applies_is_visible():
     profiles = {p.name: p for p in _model().vpn.ipsec_profiles}
 
     assert profiles["UNUSED-PROFILE"].referenced_by == []
+
+
+def test_a_route_based_peer_is_not_reported_as_an_unused_tunnel_group():
+    """A VTI reaches its peer through `tunnel destination`, never through a
+    crypto map, but still authenticates against the tunnel-group named after
+    that peer. Counting only crypto map peers reports every VTI peer as unused."""
+    model, _ = asa.parse(CONFIG + (
+        "tunnel-group 198.51.100.201 type ipsec-l2l\n"
+        "tunnel-group 198.51.100.201 ipsec-attributes\n"
+        " ikev1 pre-shared-key <redacted:cccc3333>\n"), platform="asa")
+    groups = {g.name: g for g in model.vpn.tunnel_groups}
+
+    assert groups["198.51.100.201"].referenced_by == ["interface Tunnel1"]

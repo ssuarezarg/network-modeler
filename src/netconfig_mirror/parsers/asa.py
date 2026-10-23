@@ -447,6 +447,16 @@ def _link_references(model: DeviceModel) -> None:
                 for peer in entry.peers:
                     peers.setdefault(peer, []).append(
                         f"crypto map {crypto_map.name} {entry.seq}")
+        # A route-based tunnel reaches its peer through `tunnel destination`,
+        # not through a crypto map, but it still authenticates against the
+        # tunnel-group named after that peer. Counting only crypto map peers
+        # would report every VTI peer as a tunnel-group nothing uses - the
+        # kind of confident false finding that teaches people to stop reading
+        # the report.
+        for interface in model.interfaces:
+            if interface.tunnel_destination:
+                peers.setdefault(interface.tunnel_destination, []).append(
+                    f"interface {interface.name}")
         for group in model.vpn.tunnel_groups:
             group.referenced_by = peers.get(group.name, [])
 

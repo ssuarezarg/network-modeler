@@ -43,6 +43,14 @@ class DeviceDoc:
     def route_maps(self) -> dict[str, dict]:
         return {m["name"]: m for m in self.data.get("route_maps", [])}
 
+    @property
+    def access_lists(self) -> dict[str, dict]:
+        return {a["name"]: a for a in self.data.get("access_lists", [])}
+
+    @property
+    def vpn(self) -> dict:
+        return self.data.get("vpn") or {}
+
 
 def load_devices(repo: str | Path) -> list[DeviceDoc]:
     root = Path(repo) / ROOT
@@ -268,6 +276,8 @@ def audit(devices: list[DeviceDoc],
                                         f"{where} uses {name}{hint}", device.path,
                                         source=where, target=name))
 
+        _audit_asa(device, findings)
+
         for prefix_list in lists.values():
             if not prefix_list.get("referenced_by"):
                 findings.append(Finding(
@@ -283,6 +293,69 @@ def audit(devices: list[DeviceDoc],
 
 
 ACTIONABLE = (DANGLING, EMPTY)
+
+
+def _audit_asa(device: DeviceDoc, findings: list[Finding]) -> None:
+    """The same three questions in the firewall's vocabulary.
+
+    A crypto map matching an access-list that does not exist is the same fault
+    as a route-map matching a missing prefix-list, with a worse consequence:
+    the clause matches no traffic, so the tunnel carries nothing and stays up
+    looking healthy. An access-list in no access-group filters nothing. A
+    tunnel-group no crypto map and no tunnel interface points at is a peer
+    that was configured and never wired up.
+    """
+    # No guard on "is this an ASA". Every loop below is empty on a platform
+    # that has none of these constructs, and a guard keyed on one of them
+    # skipped the others: an access-group pointing at nothing went unreported
+    # on a device whose VPN section happened to be absent.
+    acls = device.access_lists
+    vpn = device.vpn
+
+    def _check(where: str, name: str) -> None:
+        entry = acls.get(name)
+        if entry is None:
+            findings.append(Finding(device.hostname, DANGLING,
+                                    f"{where} uses {name}", device.path,
+                                    source=where, target=name))
+        elif not entry.get("entries"):
+            findings.append(Finding(device.hostname, EMPTY,
+                                    f"{where} uses {name}, which has no entries",
+                                    device.path, source=where, target=name))
+
+    for crypto_map in vpn.get("crypto_maps", []):
+        for entry in crypto_map.get("entries", []):
+            if name := entry.get("match_address"):
+                _check(f"crypto map {crypto_map['name']} {entry.get('seq')}", name)
+
+    for group in device.data.get("access_groups", []):
+        _check(f"access-group {group.get('direction')} "
+               f"{group.get('interface') or ''}".strip(), group["access_list"])
+
+    profiles = {p["name"] for p in vpn.get("ipsec_profiles", [])}
+    for interface in device.data.get("interfaces", []):
+        name = interface.get("tunnel_protection")
+        if name and name not in profiles:
+            findings.append(Finding(
+                device.hostname, DANGLING,
+                f"interface {interface['name']} uses ipsec profile {name}",
+                device.path, source=f"interface {interface['name']}", target=name))
+
+    for group in vpn.get("tunnel_groups", []):
+        if not group.get("referenced_by"):
+            findings.append(Finding(
+                device.hostname, ORPHANED,
+                f"tunnel-group {group['name']} "
+                f"({group.get('type') or 'no type'}) is used by nothing",
+                device.path, target=group["name"]))
+
+    for profile in vpn.get("ipsec_profiles", []):
+        if not profile.get("referenced_by"):
+            findings.append(Finding(
+                device.hostname, ORPHANED,
+                f"ipsec profile {profile['name']} is applied to no interface",
+                device.path, target=profile["name"]))
+
 
 
 def unacknowledged_dangling(findings: list[Finding]) -> list[Finding]:

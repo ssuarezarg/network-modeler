@@ -363,3 +363,101 @@ def test_an_empty_prefix_list_can_be_acknowledged(tmp_path):
     })
     key = [f for f in audit(devices) if f.kind == EMPTY][0].key
     assert not unacknowledged_dangling(audit(devices, acknowledged={key}))
+
+
+def _asa(tmp_path, doc):
+    directory = tmp_path / "inventory" / "lac1" / "fw1"
+    directory.mkdir(parents=True)
+    (directory / "device.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
+    return load_devices(tmp_path)
+
+
+def test_a_crypto_map_matching_a_missing_access_list(tmp_path):
+    """The same fault as a route-map matching a missing prefix-list, with a
+    worse consequence: the clause matches no traffic, so the tunnel carries
+    nothing while staying up and looking healthy."""
+    devices = _asa(tmp_path, {
+        "device": {"hostname": "fw1"},
+        "vpn": {"crypto_maps": [{"name": "outside_map", "entries": [
+            {"seq": "10", "match_address": "GONE", "peers": ["198.51.100.7"]}]}],
+            "tunnel_groups": [{"name": "198.51.100.7",
+                               "referenced_by": ["crypto map outside_map 10"]}]},
+    })
+    dangling = [f for f in audit(devices) if f.kind == DANGLING]
+
+    assert len(dangling) == 1
+    assert dangling[0].key == "dangling:lac1/fw1:crypto map outside_map 10:GONE"
+
+
+def test_a_crypto_map_matching_an_empty_access_list(tmp_path):
+    """A tunnel encrypting nothing."""
+    devices = _asa(tmp_path, {
+        "device": {"hostname": "fw1"},
+        "access_lists": [{"name": "outside_cryptomap", "entry_count": 0}],
+        "vpn": {"crypto_maps": [{"name": "outside_map", "entries": [
+            {"seq": "10", "match_address": "outside_cryptomap"}]}]},
+    })
+
+    assert [f.kind for f in audit(devices) if f.kind in (DANGLING, EMPTY)] == [EMPTY]
+
+
+def test_an_access_group_pointing_at_nothing(tmp_path):
+    devices = _asa(tmp_path, {
+        "device": {"hostname": "fw1"},
+        "access_groups": [{"access_list": "GONE", "direction": "in",
+                           "interface": "outside"}],
+    })
+    dangling = [f for f in audit(devices) if f.kind == DANGLING]
+
+    assert dangling[0].target == "GONE"
+    assert "access-group in outside" in dangling[0].source
+
+
+def test_a_tunnel_group_nothing_points_at(tmp_path):
+    devices = _asa(tmp_path, {
+        "device": {"hostname": "fw1"},
+        "vpn": {"tunnel_groups": [
+            {"name": "198.51.100.7", "type": "ipsec-l2l",
+             "referenced_by": ["crypto map outside_map 10"]},
+            {"name": "198.51.100.99", "type": "ipsec-l2l"}]},
+    })
+    orphans = [f for f in audit(devices) if f.kind == ORPHANED]
+
+    assert len(orphans) == 1
+    assert orphans[0].target == "198.51.100.99"
+
+
+def test_an_ipsec_profile_applied_to_no_interface(tmp_path):
+    devices = _asa(tmp_path, {
+        "device": {"hostname": "fw1"},
+        "interfaces": [{"name": "Tunnel1", "tunnel_protection": "USED"}],
+        "vpn": {"ipsec_profiles": [{"name": "USED",
+                                    "referenced_by": ["interface Tunnel1"]},
+                                   {"name": "UNUSED"}]},
+    })
+    orphans = [f for f in audit(devices) if f.kind == ORPHANED]
+
+    assert [o.target for o in orphans] == ["UNUSED"]
+
+
+def test_a_tunnel_interface_using_a_profile_that_does_not_exist(tmp_path):
+    devices = _asa(tmp_path, {
+        "device": {"hostname": "fw1"},
+        "interfaces": [{"name": "Tunnel1", "tunnel_protection": "GONE"}],
+        "vpn": {"ipsec_profiles": [{"name": "OTHER",
+                                    "referenced_by": ["interface Tunnel1"]}]},
+    })
+    dangling = [f for f in audit(devices) if f.kind == DANGLING]
+
+    assert dangling[0].target == "GONE"
+
+
+def test_an_ios_device_produces_no_firewall_findings(tmp_path):
+    """The firewall checks must stay silent on a platform that has none of
+    these constructs, or they add a finding per device to every run."""
+    devices = _mirror(tmp_path, {
+        "r1": {"device": {"hostname": "r1"},
+               "prefix_lists": [_pl("A", ["10.0.0.0/8"], referenced_by=["rm"])]},
+    })
+
+    assert audit(devices) == []
