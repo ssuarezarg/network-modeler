@@ -384,6 +384,21 @@ def cmd_sync(args: argparse.Namespace) -> int:
     selected = [c for c in captures if _matches(c, args)]
     complete_run = not (args.site or args.vendor or args.collector_id)
 
+    # Fetched before the main loop, not after it, because the loop needs to
+    # know which devices these are. A Firepower has a `show running-config`
+    # row as well as its FMC endpoints, and that row reaches `_sync_one` like
+    # any other. While an unparsable platform was discarded that was harmless;
+    # now that it is mirrored as text, it writes a raw.cfg into the device's
+    # directory and overwrites the meta.yaml the JSON path had written there.
+    composite: dict = {}
+    if not args.vendor:
+        connection = extract.connect(args.dsn)
+        try:
+            composite = extract.fetch_composite(connection, collector_id=args.collector_id)
+        finally:
+            connection.close()
+    composite_ids = {c[0].device_id for c in composite.values() if c}
+
     repo.ensure_readme()
     existing = repo.existing_devices()
     sync = gitops.SyncReport()
@@ -402,7 +417,8 @@ def cmd_sync(args: argparse.Namespace) -> int:
             repo.move(previous, relative)
             sync.renamed.append((previous, relative))
 
-        result = _sync_one(repo, capture, key, args, relative, sync)
+        result = _sync_one(repo, capture, key, args, relative, sync,
+                           allow_raw=capture.device_id not in composite_ids)
         report.results.append(result)
         # A raw-mirrored device is kept for the same reason a modelled one is:
         # left out of this set, prune would delete it as decommissioned on the
@@ -413,13 +429,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
     # Firepower: several JSON endpoints per device, mirrored verbatim rather
     # than modelled. Skipped entirely on a filtered run that named a vendor,
     # since the filter was about CLI platforms.
-    if not args.vendor:
-        connection = extract.connect(args.dsn)
-        try:
-            composite = extract.fetch_composite(connection, collector_id=args.collector_id)
-        finally:
-            connection.close()
-
+    if composite:
         mirrored: list[batchlib.DeviceResult] = []
         for captures in composite.values():
             first = captures[0]
@@ -495,7 +505,8 @@ def cmd_sync(args: argparse.Namespace) -> int:
 
 
 def _sync_one(repo, capture, key: bytes, args, relative: str,
-              sync: "gitops.SyncReport") -> "batchlib.DeviceResult":
+              sync: "gitops.SyncReport", *,
+              allow_raw: bool = True) -> "batchlib.DeviceResult":
     result = batchlib.DeviceResult(
         hostname=capture.label,
         site=layout.site_of(capture), outcome=batchlib.OK,
@@ -520,6 +531,13 @@ def _sync_one(repo, capture, key: bytes, args, relative: str,
 
     result.platform = detection.platform
     if model is None:
+        if not allow_raw:
+            # This device is mirrored by another path - Firepower's FMC
+            # endpoints - which owns its directory. Writing text into it would
+            # overwrite the metadata that path had written.
+            result.outcome = batchlib.NO_PARSER
+            result.detail = f"platform {detection.platform}, mirrored elsewhere"
+            return result
         # No parser, but a configuration we read and redacted all the same.
         # Returning here used to throw it away: an ASA left nothing in the
         # mirror at all, not even the text, so nobody could see that it had

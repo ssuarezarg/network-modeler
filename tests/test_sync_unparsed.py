@@ -129,3 +129,23 @@ def test_a_supported_platform_still_takes_the_modelled_path(repo):
 
     assert result.outcome == batchlib.OK
     assert (repo.path / "inventory/dc4/r1/device.yaml").is_file()
+
+
+def test_a_device_mirrored_by_another_path_is_not_overwritten(repo):
+    """A Firepower has a `show running-config` row as well as its FMC
+    endpoints. While an unparsable platform was discarded that row was
+    harmless; mirroring it as text wrote a raw.cfg into the directory the JSON
+    path owns and overwrote the meta.yaml it had written there."""
+    relative = "inventory/am5/am5-fw1"
+    repo.write_files(relative, {"fmc_devices.json": "{}\n"})
+    repo.write_meta(relative, yaml.safe_dump({"platform": "firepower"}))
+
+    sync = SyncReport()
+    result = _sync_one(repo, _capture(ASA), b"test-key", _Args(), relative,
+                       sync, allow_raw=False)
+
+    assert result.outcome == batchlib.NO_PARSER
+    assert not (repo.path / relative / "raw.cfg").exists()
+    meta = yaml.safe_load((repo.path / relative / "meta.yaml").read_text())
+    assert meta == {"platform": "firepower"}
+    assert sync.written == []
