@@ -491,7 +491,12 @@ def cmd_sync(args: argparse.Namespace) -> int:
     sync.committed = commit
 
     print(batchlib.render_summary(report))
-    if commit:
+    if commit and not (sync.changed or sync.renamed or sync.removed):
+        # The reports are rewritten every run, so a run where no device moved
+        # can still have something to commit. Printing three zeroes next to a
+        # commit hash reads as a bug in the counting.
+        print(f"\ncommitted {commit}: reports only, no device changed")
+    elif commit:
         print(f"\ncommitted {commit}: {len(sync.changed)} changed, "
               f"{len(sync.renamed)} renamed, {len(sync.removed)} removed")
     else:
