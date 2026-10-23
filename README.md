@@ -247,6 +247,24 @@ only number that says whether the parser is finished for a platform. The
 `unrecognised` list is ordered by frequency, so the next extractor worth writing
 is chosen from evidence.
 
+## IPsec endpoints
+
+```bash
+docker/run.sh vpn --repo /mirror
+```
+
+Every remote party that terminates a tunnel on the estate, and how each one
+is reached. Written for a relocation: when a site moves, each of these is a
+counterparty, and the tunnel survives the move only if the local public
+address does.
+
+A tunnel is built in one of two ways that look nothing alike in the
+configuration — a crypto map matching an access-list, or a tunnel interface
+with an IPsec profile and no access-list at all — so a survey that knows only
+one of them misses the other entirely. Both are listed, along with
+tunnel-groups no tunnel points at, which during a move is the same question
+as a decommissioned peer: does anyone on the far end still expect this?
+
 ## Platform support
 
 | Platform | Status |

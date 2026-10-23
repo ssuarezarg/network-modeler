@@ -23,6 +23,7 @@ import yaml
 
 from . import batch as batchlib
 from . import analysis, envfile, extract, gitops, inventory, jsondoc, layout
+from . import vpn as vpnlib
 from .blocks import ConfigDocument
 from .detect import detect
 from . import freshness as freshnesslib
@@ -661,6 +662,16 @@ def _write_report(path: str, content: str) -> int:
     return EXIT_OK
 
 
+def cmd_vpn(args: argparse.Namespace) -> int:
+    """Who terminates a tunnel on this estate, and how each one is reached."""
+    devices = analysis.load_devices(args.repo)
+    report = vpnlib.render(vpnlib.collect(devices))
+    if args.out_file:
+        return _write_report(args.out_file, report)
+    print(report)
+    return EXIT_OK
+
+
 def cmd_audit(args: argparse.Namespace) -> int:
     """Policy that cannot do what it appears to do, across the whole mirror."""
     devices = analysis.load_devices(args.repo)
@@ -990,6 +1001,13 @@ def main(argv: list[str] | None = None) -> int:
                               help="list every unreferenced prefix-list instead of a sample")
     policy_audit.add_argument("--env-file", default=None, help=argparse.SUPPRESS)
     policy_audit.set_defaults(func=cmd_audit)
+
+    endpoints = sub.add_parser(
+        "vpn", help="every IPsec endpoint in the estate and how it is reached")
+    endpoints.add_argument("--repo", required=True, help="path to the mirror repository")
+    endpoints.add_argument("--out-file", help="write the report here instead of stdout")
+    endpoints.add_argument("--env-file", default=None, help=argparse.SUPPRESS)
+    endpoints.set_defaults(func=cmd_vpn)
 
     survey = sub.add_parser(
         "inventory", help="survey the estate: platforms, sites, tenants, "
