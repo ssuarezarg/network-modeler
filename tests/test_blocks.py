@@ -64,3 +64,65 @@ def test_unconsumed_reports_genuinely_unknown_lines():
     doc = ConfigDocument("hostname R1\nsome-unknown-command foo\n")
     doc.consume(doc.blocks[0])
     assert [line for _, line in doc.unconsumed()] == ["some-unknown-command foo"]
+
+
+ASA_SHAPED = """ASA Version 9.12(4)
+hostname fw1
+interface GigabitEthernet0/0
+ nameif outside
+ ip address 10.0.0.1 255.255.255.0
+interface GigabitEthernet0/1
+ nameif inside
+object network SRV-A
+ host 10.1.1.10
+object network SRV-B
+ host 10.1.1.11
+object network SRV-C
+ host 10.1.1.12
+object service HTTPS
+ service tcp destination eq 443
+access-list outside_in extended permit tcp any object SRV-A eq 443
+access-list outside_in extended deny ip any any
+access-list inside_in extended permit ip any any
+"""
+
+
+def _census(text):
+    return {label: (count, nested)
+            for label, count, nested in ConfigDocument(text).command_census()}
+
+
+def test_a_closed_set_of_second_words_is_kept():
+    """`object network` and `object service` are different things and a parser
+    has to cover them separately, so the census must not merge them."""
+    census = _census(ASA_SHAPED)
+
+    assert census["object network"] == (3, 3)
+    assert census["object service"] == (1, 1)
+
+
+def test_an_identifier_as_second_word_is_collapsed():
+    """An ACL name varies per line. Splitting on it would turn one command
+    family worth thousands of lines into one row per access-list."""
+    census = _census(ASA_SHAPED)
+
+    assert census["access-list"] == (3, 0)
+    assert not any(key.startswith("access-list ") for key in census)
+
+
+def test_many_names_across_few_lines_collapse_too():
+    """Two interfaces with two distinct names: as many names as lines, which is
+    what an identifier looks like however small the sample."""
+    census = _census(ASA_SHAPED)
+
+    assert census["interface"] == (2, 3)
+
+
+def test_nested_lines_are_counted_against_their_parent():
+    """The weight of a block command is in its children, not its headers - the
+    number that says how much of a parser it will take."""
+    assert _census(ASA_SHAPED)["interface"][1] == 3
+
+
+def test_a_command_seen_once_is_not_dressed_up_as_a_family():
+    assert _census(ASA_SHAPED)["hostname"] == (1, 0)

@@ -173,3 +173,57 @@ class ConfigDocument:
             key = " ".join(line.split()[:2])
             counts[key] = counts.get(key, 0) + 1
         return sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[:limit]
+
+    def command_census(self, limit: int = 30) -> list[tuple[str, int, int]]:
+        """Every top-level command family, with how many lines hang under it.
+
+        What decides the scope of a parser that has not been written yet. The
+        two-token grouping `unconsumed_summary` uses is wrong for this: on an
+        ASA, `access-list <name> extended permit ...` would produce one row per
+        access-list name and bury the fact that there is a single command
+        family worth thousands of lines.
+
+        So the second word is only kept when it comes from a small closed set -
+        `object network` / `object service` - and collapsed to `<name>` when it
+        varies per line, which is what an identifier does. The rule is measured
+        from the configuration itself rather than from a list of keywords this
+        code would have to keep up to date per platform.
+        """
+        families: dict[str, list[Block]] = {}
+        for block in self.blocks:
+            head = block.header.strip().split()
+            if head:
+                families.setdefault(head[0], []).append(block)
+
+        rows: list[tuple[str, int, int]] = []
+        for command, blocks in families.items():
+            for label, group in _subdivide(command, blocks):
+                nested = sum(len(b.children) for b in group)
+                rows.append((label, len(group), nested))
+        return sorted(rows, key=lambda row: row[1] + row[2], reverse=True)[:limit]
+
+
+# A second word is a keyword when a handful of values repeat across many
+# lines - `object network` / `object service`. It is an identifier when the
+# values are as numerous as the lines, which is what a name does. Both
+# thresholds are needed: `access-list` on a real firewall has ten names across
+# a thousand lines, so repetition alone would split the family by ACL name and
+# bury the one fact that matters, that it is a thousand lines.
+_MAX_KEYWORD_VARIANTS = 4
+_MIN_BLOCKS_PER_VARIANT = 2
+
+
+def _subdivide(command: str, blocks: list["Block"]) -> list[tuple[str, list["Block"]]]:
+    seconds: dict[str, list[Block]] = {}
+    for block in blocks:
+        words = block.header.strip().split()
+        seconds.setdefault(words[1] if len(words) > 1 else "", []).append(block)
+
+    keyword_like = (
+        len(seconds) <= _MAX_KEYWORD_VARIANTS
+        and len(blocks) >= len(seconds) * _MIN_BLOCKS_PER_VARIANT
+        and "" not in seconds
+    )
+    if not keyword_like:
+        return [(command, blocks)]
+    return [(f"{command} {second}", group) for second, group in seconds.items()]

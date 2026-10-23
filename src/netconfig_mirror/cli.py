@@ -238,6 +238,19 @@ def _explain_no_parser(detection, redacted: str, out_dir: Path) -> None:
     for line in lines[:15]:
         print(f"  {line[:100]}", file=out)
     print("-" * 68, file=out)
+
+    # What the first fifteen lines cannot tell you is how big each part of the
+    # configuration is, and that is what decides the scope of the parser that
+    # has to be written next. Scoping it from a sample of the top of the file
+    # means writing for whatever happens to appear first.
+    census = ConfigDocument(redacted).command_census()
+    if census:
+        print("\nCommand census - what a parser for this platform would have "
+              "to cover:", file=out)
+        print(f"  {'blocks':>7}  {'nested':>7}   command", file=out)
+        for label, count, nested in census:
+            print(f"  {count:>7}  {nested:>7}   {label}", file=out)
+
     print(f"\nFull redacted capture saved to {out_dir}/raw.cfg", file=out)
 
 
