@@ -398,6 +398,9 @@ def cmd_sync(args: argparse.Namespace) -> int:
         finally:
             connection.close()
     composite_ids = {c[0].device_id for c in composite.values() if c}
+    # The CLI row of a composite device, handed to the path that owns its
+    # directory instead of being modelled by the main loop.
+    cli_rows = {c.device_id: c for c in selected if c.device_id in composite_ids}
 
     repo.ensure_readme()
     existing = repo.existing_devices()
@@ -435,7 +438,8 @@ def cmd_sync(args: argparse.Namespace) -> int:
             first = captures[0]
             if not _matches(first, args):
                 continue
-            result = _sync_composite(repo, first, captures, key, sync)
+            result = _sync_composite(repo, first, captures, key, sync,
+                                     cli_capture=cli_rows.get(first.device_id))
             mirrored.append(result)
             if result.outcome == batchlib.MIRRORED:
                 keep.add(result.path)
@@ -681,8 +685,17 @@ def cmd_audit(args: argparse.Namespace) -> int:
 
 
 def _sync_composite(repo, capture, captures, key: bytes,
-                    sync: "gitops.SyncReport") -> "batchlib.DeviceResult":
-    """Mirror one device whose configuration is several JSON endpoints."""
+                    sync: "gitops.SyncReport", *,
+                    cli_capture=None) -> "batchlib.DeviceResult":
+    """Mirror one device whose configuration is several JSON endpoints.
+
+    Firepower also has a `show running-config` row, and in FTD mode it is ASA
+    syntax that the ASA parser reads. It holds interfaces, NAT and routing
+    that the FMC endpoints do not necessarily carry. It is modelled here,
+    inside the path that owns this directory, rather than by the main loop:
+    two writers in one directory is what produced a device.yaml beside the
+    JSON and a meta.yaml that described whichever path ran last.
+    """
     relative = layout.device_path(capture)
     result = batchlib.DeviceResult(
         hostname=capture.label,
@@ -709,14 +722,22 @@ def _sync_composite(repo, capture, captures, key: bytes,
             return result
         rendered[f"{item.command}.json"] = jsondoc.render(parsed)
 
+    running_config = None
+    if cli_capture is not None:
+        running_config = _render_running_config(cli_capture, key, rendered, result)
+        if result.outcome == batchlib.REDACTION_REFUSED:
+            return result
+
     changed = repo.write_files(relative, rendered)
     if changed:
         repo.write_meta(relative, yaml.safe_dump({
             "platform": "firepower",
-            "modelled": False,
-            "note": "Mirrored as JSON endpoints. Firepower has no flat "
-                    "configuration; this is L0 only.",
+            "modelled": running_config is not None,
+            "note": "Mirrored as JSON endpoints from FMC. The device also has "
+                    "a flat CLI configuration; where it was captured it is "
+                    "modelled in running-config.yaml.",
             "endpoints": sorted(rendered),
+            "running_config": running_config,
             "source": {"device_id": capture.device_id,
                        "collected_at": capture.collected_at.isoformat(),
                        "collector_id": capture.collector_id,
@@ -726,6 +747,59 @@ def _sync_composite(repo, capture, captures, key: bytes,
         print(f"  changed  {relative[len(layout.ROOT) + 1:]}  (json)")
 
     return result
+
+
+def _render_running_config(cli_capture, key: bytes, rendered: dict,
+                           result) -> dict | None:
+    """Model the CLI capture of a device whose primary source is FMC.
+
+    Returns the metadata to record, or None when there was nothing usable.
+    Writes into `rendered` so the whole directory is still one write.
+    """
+    attempt, detail, _ = batchlib.should_attempt(cli_capture)
+    if not attempt:
+        return {"captured": False, "reason": detail}
+
+    try:
+        model, doc, detection, _, redaction, redacted = build_model(
+            cli_capture.output, key, hint_version=cli_capture.os_version)
+    except RedactionError as error:
+        # Not silently dropped. This row is the only place a credential in the
+        # device's CLI configuration would show up, and a device mirrored by
+        # another path must not become exempt from that check.
+        result.outcome = batchlib.REDACTION_REFUSED
+        result.detail = f"running-config: {error}"
+        return None
+    except Exception as error:  # noqa: BLE001 - one device must not stop the run
+        return {"captured": True, "modelled": False,
+                "error": f"{type(error).__name__}: {error}"}
+
+    rendered["running-config.cfg"] = redacted
+    if model is None:
+        return {"captured": True, "modelled": False,
+                "platform": detection.platform,
+                "reason": "no parser for this platform",
+                "collected_at": cli_capture.collected_at.isoformat()}
+
+    rendered["running-config.yaml"] = yaml.safe_dump(
+        model.to_dict(), sort_keys=False, default_flow_style=False,
+        allow_unicode=True, width=100)
+    return {
+        "captured": True,
+        "modelled": True,
+        "platform": detection.platform,
+        "os_version": detection.os_version,
+        "modelled_pct": round(doc.coverage() * 100, 1),
+        "accounted_pct": round(doc.accounted() * 100, 1),
+        "redaction": {"tokens_written": redaction.total,
+                      "upstream_sanitised": redaction.upstream_sanitised},
+        # Recorded beside the FMC timestamp on purpose. These two come from
+        # different collectors and go stale independently: FMC endpoints 44
+        # days old next to a CLI capture from today says the device is
+        # reachable and FMC collection is what broke, which is the one thing
+        # the stale report cannot say on its own.
+        "collected_at": cli_capture.collected_at.isoformat(),
+    }
 
 
 def cmd_volatile(args: argparse.Namespace) -> int:

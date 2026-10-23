@@ -254,7 +254,7 @@ is chosen from evidence.
 | IOS, IOS-XE | supported |
 | NX-OS | supported — features, VXLAN/NVE, VLAN-to-VNI, nested BGP |
 | ASA, IOS-XR | detected, no parser — mirrored as redacted text, not modelled |
-| Firepower / FTD | out of scope: arrives as `fmc_*` REST endpoints, not a flat config |
+| Firepower / FTD | FMC endpoints mirrored as JSON; the device's own CLI config modelled beside them as `running-config.yaml` |
 
 An unsupported platform is reported rather than producing an empty model that
 would look valid. Its configuration is still redacted and committed as
