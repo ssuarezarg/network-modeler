@@ -43,6 +43,16 @@ hostname r1
 )
 
 
+ASA_SHAPED = """: Saved
+ASA Version 9.9(1)
+hostname fw1
+""" + "".join(
+    f"object network SRV-{n}\n host 10.1.1.{n}\n"
+    f"access-list outside_in extended permit ip any object SRV-{n}\n"
+    for n in range(40)
+)
+
+
 def _git(path, *args):
     subprocess.run(["git", *args], cwd=path, check=True, capture_output=True)
 
@@ -143,10 +153,30 @@ def test_a_device_mirrored_by_another_path_is_not_overwritten(repo):
 
     sync = SyncReport()
     result = _sync_one(repo, _capture(XR), b"test-key", _Args(), relative,
-                       sync, allow_raw=False)
+                       sync, owns_path=False)
 
     assert result.outcome == batchlib.NO_PARSER
     assert not (repo.path / relative / "raw.cfg").exists()
     meta = yaml.safe_load((repo.path / relative / "meta.yaml").read_text())
     assert meta == {"platform": "firepower"}
     assert sync.written == []
+
+
+def test_a_parsable_capture_is_blocked_from_that_directory_too(repo):
+    """A Firepower in FTD mode emits ASA syntax. The moment an ASA parser
+    existed, these captures stopped being unparsable and took the *modelled*
+    path into the same directory - a guard on the raw path alone let 24
+    devices through on the first run after that."""
+    relative = "inventory/am5/am5-fw1"
+    repo.write_files(relative, {"fmc_devices.json": "{}\n"})
+    repo.write_meta(relative, yaml.safe_dump({"platform": "firepower"}))
+
+    sync = SyncReport()
+    result = _sync_one(repo, _capture(ASA_SHAPED), b"test-key", _Args(),
+                       relative, sync, owns_path=False)
+
+    assert result.outcome == batchlib.NO_PARSER
+    assert not (repo.path / relative / "device.yaml").exists()
+    assert not (repo.path / relative / "raw.cfg").exists()
+    assert yaml.safe_load((repo.path / relative / "meta.yaml").read_text()) == {
+        "platform": "firepower"}

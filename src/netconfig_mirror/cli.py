@@ -418,7 +418,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
             sync.renamed.append((previous, relative))
 
         result = _sync_one(repo, capture, key, args, relative, sync,
-                           allow_raw=capture.device_id not in composite_ids)
+                           owns_path=capture.device_id not in composite_ids)
         report.results.append(result)
         # A raw-mirrored device is kept for the same reason a modelled one is:
         # left out of this set, prune would delete it as decommissioned on the
@@ -506,7 +506,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
 
 def _sync_one(repo, capture, key: bytes, args, relative: str,
               sync: "gitops.SyncReport", *,
-              allow_raw: bool = True) -> "batchlib.DeviceResult":
+              owns_path: bool = True) -> "batchlib.DeviceResult":
     result = batchlib.DeviceResult(
         hostname=capture.label,
         site=layout.site_of(capture), outcome=batchlib.OK,
@@ -530,14 +530,20 @@ def _sync_one(repo, capture, key: bytes, args, relative: str,
         return result
 
     result.platform = detection.platform
+
+    # Another path owns this device's directory - Firepower's FMC endpoints -
+    # so nothing here may write into it. The check sits after `build_model`
+    # so redaction still runs over the capture and still refuses, and before
+    # every write rather than only before the raw one: a Firepower in FTD mode
+    # emits ASA syntax, so the moment an ASA parser existed these captures
+    # stopped being unparsable and started taking the modelled path into the
+    # same directory, writing a device.yaml and a raw.cfg beside the JSON.
+    if not owns_path:
+        result.outcome = batchlib.NO_PARSER
+        result.detail = f"platform {detection.platform}, mirrored elsewhere"
+        return result
+
     if model is None:
-        if not allow_raw:
-            # This device is mirrored by another path - Firepower's FMC
-            # endpoints - which owns its directory. Writing text into it would
-            # overwrite the metadata that path had written.
-            result.outcome = batchlib.NO_PARSER
-            result.detail = f"platform {detection.platform}, mirrored elsewhere"
-            return result
         # No parser, but a configuration we read and redacted all the same.
         # Returning here used to throw it away: an ASA left nothing in the
         # mirror at all, not even the text, so nobody could see that it had
