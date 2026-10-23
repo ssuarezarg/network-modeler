@@ -33,6 +33,12 @@ class Interface:
     hsrp_groups: list[str] = field(default_factory=list)
     service_policies: list[str] = field(default_factory=list)
     helper_addresses: list[str] = field(default_factory=list)
+    # ASA. `nameif` is the join key for the whole configuration - NAT pairs,
+    # access-groups and crypto maps all refer to an interface by this name and
+    # never by `GigabitEthernet0/0`. Without it nothing else cross-references.
+    nameif: str | None = None
+    security_level: str | None = None
+    standby_ip: str | None = None
 
 
 @dataclass
@@ -51,6 +57,11 @@ class StaticRoute:
     prefix: str
     next_hop: str | None = None
     vrf: str | None = None
+    # ASA names the egress interface on every route, by nameif. It is not a
+    # VRF and must not be written into that field: two default routes out of
+    # two interfaces are the normal shape here, and reading them as two VRFs
+    # would invent a segmentation the device does not have.
+    interface: str | None = None
     distance: str | None = None
     track: str | None = None
 
@@ -172,6 +183,119 @@ class NveInterface:
     vnis: list[str] = field(default_factory=list)
 
 
+# --- ASA ---------------------------------------------------------------
+# Objects are the vocabulary the rest of an ASA configuration is written in:
+# an access-list or a NAT rule names an object far more often than it names an
+# address, so without these the policy reads as references to nothing.
+
+
+@dataclass
+class NetworkObject:
+    name: str
+    kind: str | None = None          # host | subnet | range | fqdn
+    value: str | None = None
+    description: str | None = None
+    # Object NAT, configured inside the object rather than as a `nat` line.
+    nat: str | None = None
+    referenced_by: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ObjectGroup:
+    name: str
+    kind: str | None = None          # network | service | protocol | icmp-type
+    protocol: str | None = None      # `object-group service NAME tcp`
+    description: str | None = None
+    members: list[str] = field(default_factory=list)
+    member_count: int = 0
+    referenced_by: list[str] = field(default_factory=list)
+
+
+@dataclass
+class AccessGroup:
+    """Where an access-list is actually applied. An ACL that exists but is in
+    no access-group filters nothing, which is invisible by reading either one
+    on its own."""
+
+    access_list: str
+    direction: str | None = None     # in | out | global
+    interface: str | None = None
+
+
+@dataclass
+class NatRule:
+    source_interface: str | None = None
+    destination_interface: str | None = None
+    kind: str | None = None          # static | dynamic
+    section: str | None = None       # after-auto, twice-nat section
+    rule: str = ""                   # the remainder, verbatim
+
+
+@dataclass
+class IkePolicy:
+    version: str                     # ikev1 | ikev2
+    priority: str
+    authentication: str | None = None
+    encryption: str | None = None
+    integrity: str | None = None     # `hash` on ikev1, `integrity` on ikev2
+    group: str | None = None
+    prf: str | None = None
+    lifetime: str | None = None
+
+
+@dataclass
+class IpsecProposal:
+    name: str
+    version: str                     # ikev1 transform-set | ikev2 proposal
+    transforms: list[str] = field(default_factory=list)
+
+
+@dataclass
+class CryptoMapEntry:
+    seq: str
+    peers: list[str] = field(default_factory=list)
+    match_address: str | None = None
+    ikev1_transform_sets: list[str] = field(default_factory=list)
+    ikev2_proposals: list[str] = field(default_factory=list)
+    pfs: str | None = None
+    lifetime: str | None = None
+
+
+@dataclass
+class CryptoMap:
+    name: str
+    interface: str | None = None
+    entries: list[CryptoMapEntry] = field(default_factory=list)
+
+
+@dataclass
+class TunnelGroup:
+    name: str                        # a peer address, for site-to-site
+    type: str | None = None
+    default_group_policy: str | None = None
+    # Whether a key is configured, never the key. The value is a redaction
+    # token by the time the parser sees it, and a token in the model would
+    # change whenever the key is rotated - which is information worth having,
+    # but it belongs in the diff of raw.cfg, not in a boolean's place.
+    has_pre_shared_key: bool = False
+    ikev2_local_authentication: str | None = None
+    ikev2_remote_authentication: str | None = None
+    # Crypto map entries whose peer is this tunnel-group. Computed, and the
+    # reason this is modelled: a tunnel-group no crypto map points at is a peer
+    # that was configured and never wired up, or one left behind by a
+    # decommission.
+    referenced_by: list[str] = field(default_factory=list)
+
+
+@dataclass
+class Vpn:
+    enabled_on: list[str] = field(default_factory=list)
+    ike_policies: list[IkePolicy] = field(default_factory=list)
+    ipsec_proposals: list[IpsecProposal] = field(default_factory=list)
+    crypto_maps: list[CryptoMap] = field(default_factory=list)
+    tunnel_groups: list[TunnelGroup] = field(default_factory=list)
+
+
 @dataclass
 class Device:
     hostname: str | None = None
@@ -197,6 +321,12 @@ class DeviceModel:
     access_lists: list[AccessList] = field(default_factory=list)
     prefix_lists: list[PrefixList] = field(default_factory=list)
     route_maps: list[RouteMap] = field(default_factory=list)
+    # ASA. Absent on every other platform, and `_prune` drops them there.
+    objects: list[NetworkObject] = field(default_factory=list)
+    object_groups: list[ObjectGroup] = field(default_factory=list)
+    access_groups: list[AccessGroup] = field(default_factory=list)
+    nat: list[NatRule] = field(default_factory=list)
+    vpn: Vpn | None = None
     services: Services = field(default_factory=Services)
 
     def to_dict(self) -> dict:

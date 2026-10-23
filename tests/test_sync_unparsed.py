@@ -4,6 +4,10 @@ An ASA used to leave nothing in the mirror at all - `_sync_one` returned
 before writing, so the redacted text it had just produced was discarded and
 nobody could see that the device had changed, or what it held. Versioning the
 text is most of the value and needs no parser.
+
+The fixture is IOS-XR now that the ASA has a parser. The behaviour under test
+is "a platform this tool cannot model", not any particular platform, and it
+has to keep working for whichever one is next.
 """
 import subprocess
 from datetime import datetime, timezone
@@ -19,17 +23,14 @@ from netconfig_mirror.gitops import MirrorRepo, SyncReport
 
 # Both fixtures are padded past the threshold below which a capture is read as
 # a collector error rather than a configuration.
-ASA = """: Saved
-ASA Version 9.9(1)
-hostname fw1
-interface GigabitEthernet0/0
- nameif outside
- security-level 0
- ip address 10.0.0.1 255.255.255.0
-failover key SomeFailoverKey2026
+XR = """!! IOS XR Configuration 6.5.3
+hostname rtr1
+username operator
+ group root-lr
+ password SomeLoginValue01
 """ + "".join(
-    f"object network SRV-{n}\n host 10.1.1.{n}\n"
-    f"access-list outside_in extended permit ip any object SRV-{n}\n"
+    f"interface GigabitEthernet0/0/0/{n}\n description link {n}\n"
+    f" ipv4 address 10.0.{n}.1 255.255.255.0\n"
     for n in range(40)
 )
 
@@ -63,64 +64,64 @@ class _Args:
     platform = None
 
 
-def _capture(output, hostname="fw1"):
+def _capture(output, hostname="rtr1"):
     return CapturedConfig(
-        row_id="1", device_id="dev-asa-1", command="show running-config",
+        row_id="1", device_id="dev-xr-1", command="show running-config",
         output=output, collected_at=datetime(2026, 10, 23, tzinfo=timezone.utc),
         hostname=hostname, vendor=None, os_version=None, device_type=None,
         serial_number=None, role=None, location="lac1", collector_id="c1")
 
 
-def _sync(repo, output, relative="inventory/lac1/fw1"):
+def _sync(repo, output, relative="inventory/lac1/rtr1"):
     sync = SyncReport()
     result = _sync_one(repo, _capture(output), b"test-key", _Args(), relative, sync)
     return result, sync
 
 
 def test_an_unparsed_configuration_is_mirrored_as_text(repo):
-    result, sync = _sync(repo, ASA)
+    result, sync = _sync(repo, XR)
 
     assert result.outcome == batchlib.MIRRORED_RAW
-    assert result.platform == "asa"
-    assert (repo.path / "inventory/lac1/fw1/raw.cfg").is_file()
-    assert sync.written == ["inventory/lac1/fw1"]
+    assert result.platform == "iosxr"
+    assert (repo.path / "inventory/lac1/rtr1/raw.cfg").is_file()
+    assert sync.written == ["inventory/lac1/rtr1"]
 
 
 def test_no_model_is_invented_for_it(repo):
     """A device.yaml here would be an empty model that looks valid."""
-    _sync(repo, ASA)
+    _sync(repo, XR)
 
-    assert not (repo.path / "inventory/lac1/fw1/device.yaml").exists()
+    assert not (repo.path / "inventory/lac1/rtr1/device.yaml").exists()
     assert load_devices(repo.path) == []
 
 
 def test_its_metadata_says_it_is_not_modelled(repo):
-    _sync(repo, ASA)
+    _sync(repo, XR)
     meta = yaml.safe_load(
-        (repo.path / "inventory/lac1/fw1/meta.yaml").read_text(encoding="utf-8"))
+        (repo.path / "inventory/lac1/rtr1/meta.yaml").read_text(encoding="utf-8"))
 
     assert meta["modelled"] is False
-    assert meta["platform"] == "asa"
-    assert meta["source"]["device_id"] == "dev-asa-1"
+    assert meta["platform"] == "iosxr"
+    assert meta["source"]["device_id"] == "dev-xr-1"
 
 
 def test_the_mirrored_text_is_redacted(repo):
     """It reaches a Git-tracked path, so it goes through redaction exactly as a
     modelled configuration does."""
-    _sync(repo, ASA)
-    written = (repo.path / "inventory/lac1/fw1/raw.cfg").read_text(encoding="utf-8")
+    _sync(repo, XR)
+    written = (repo.path / "inventory/lac1/rtr1/raw.cfg").read_text(encoding="utf-8")
 
-    assert "SomeFailoverKey2026" not in written
-    assert "failover key <redacted:" in written
+    assert "SomeLoginValue01" not in written
+    assert "password <redacted:" in written
 
 
 def test_an_unchanged_capture_does_not_rewrite_metadata(repo):
     """Same contract as the modelled path: provenance moves only beside a real
     content change, so an unchanged device stays untouched in the diff."""
-    _sync(repo, ASA)
+    _sync(repo, XR)
     repo.commit("first")
 
-    _, sync = _sync(repo, ASA)
+    _, sync = _sync(repo, XR)
     assert sync.changed == []
 
 
@@ -141,7 +142,7 @@ def test_a_device_mirrored_by_another_path_is_not_overwritten(repo):
     repo.write_meta(relative, yaml.safe_dump({"platform": "firepower"}))
 
     sync = SyncReport()
-    result = _sync_one(repo, _capture(ASA), b"test-key", _Args(), relative,
+    result = _sync_one(repo, _capture(XR), b"test-key", _Args(), relative,
                        sync, allow_raw=False)
 
     assert result.outcome == batchlib.NO_PARSER
