@@ -2,6 +2,7 @@ import yaml
 
 from netconfig_mirror.analysis import (
     DANGLING,
+    EMPTY,
     ORPHANED,
     audit,
     compare_policy,
@@ -9,6 +10,7 @@ from netconfig_mirror.analysis import (
     load_devices,
     render_audit,
     render_comparison,
+    unacknowledged_dangling,
 )
 
 
@@ -66,21 +68,21 @@ def test_a_different_prefix_is_reported_with_both_sides(tmp_path):
 
 
 def test_a_doubled_suffix_is_flagged_as_a_probable_typo(tmp_path):
-    """The case this was built for: BP_Plano_in_in on one device and
-    BP_Plano_in on the other."""
+    """The case this was built for: Site_Alpha_in_in on one device and
+    Site_Alpha_in on the other."""
     devices = _mirror(tmp_path, {
         "r1": {"device": {"hostname": "r1"},
-               "prefix_lists": [_pl("BP_Plano_in_in", ["10.0.0.0/8"])]},
+               "prefix_lists": [_pl("Site_Alpha_in_in", ["10.0.0.0/8"])]},
         "r2": {"device": {"hostname": "r2"},
-               "prefix_lists": [_pl("BP_Plano_in", ["10.0.0.0/8"])]},
+               "prefix_lists": [_pl("Site_Alpha_in", ["10.0.0.0/8"])]},
     })
     assert compare_policy(devices[0], devices[1]).possible_typos == \
-        [("BP_Plano_in_in", "BP_Plano_in")]
+        [("Site_Alpha_in_in", "Site_Alpha_in")]
 
 
 def test_genuinely_different_names_are_not_called_typos(tmp_path):
     devices = _mirror(tmp_path, {
-        "r1": {"device": {"hostname": "r1"}, "prefix_lists": [_pl("LUMEN_OUT", ["10.0.0.0/8"])]},
+        "r1": {"device": {"hostname": "r1"}, "prefix_lists": [_pl("CARRIER_OUT", ["10.0.0.0/8"])]},
         "r2": {"device": {"hostname": "r2"}, "prefix_lists": [_pl("CUSTOMER_IN", ["10.0.0.0/8"])]},
     })
     assert compare_policy(devices[0], devices[1]).possible_typos == []
@@ -91,13 +93,13 @@ def test_a_route_map_matching_a_nonexistent_list_is_found(tmp_path):
     not fail — it matches nothing, and the intended policy never applies."""
     devices = _mirror(tmp_path, {
         "r1": {"device": {"hostname": "r1"},
-               "prefix_lists": [_pl("BP_Plano_in_in", ["10.0.0.0/8"])],
-               "route_maps": [{"name": "TO-LUMEN", "prefix_lists": ["BP_Plano_in"]}]},
+               "prefix_lists": [_pl("Site_Alpha_in_in", ["10.0.0.0/8"])],
+               "route_maps": [{"name": "TO-CARRIER", "prefix_lists": ["Site_Alpha_in"]}]},
     })
     findings = [f for f in audit(devices) if f.kind == DANGLING]
     assert len(findings) == 1
-    assert "route-map TO-LUMEN uses BP_Plano_in" in findings[0].detail
-    assert "did you mean BP_Plano_in_in?" in findings[0].detail
+    assert "route-map TO-CARRIER uses Site_Alpha_in" in findings[0].detail
+    assert "did you mean Site_Alpha_in_in?" in findings[0].detail
 
 
 def test_a_neighbour_applying_a_nonexistent_list_is_also_found(tmp_path):
@@ -198,16 +200,16 @@ def test_a_finding_key_ignores_the_suggestion_text(tmp_path):
     acknowledgement keyed on it would silently stop matching."""
     devices = _mirror(tmp_path, {
         "r1": {"device": {"hostname": "r1"},
-               "prefix_lists": [_pl("BP_Plano_in_in", ["10.0.0.0/8"])],
-               "route_maps": [{"name": "RM", "prefix_lists": ["BP_Plano_in"]}]},
+               "prefix_lists": [_pl("Site_Alpha_in_in", ["10.0.0.0/8"])],
+               "route_maps": [{"name": "RM", "prefix_lists": ["Site_Alpha_in"]}]},
     })
     finding = [f for f in audit(devices) if f.kind == DANGLING][0]
     # Keyed on the mirror path, which is unique; the hostname form stays valid
     # as the coarser match for files written before paths were used.
-    assert finding.key == "dangling:dc4/r1:route-map RM:BP_Plano_in"
+    assert finding.key == "dangling:dc4/r1:route-map RM:Site_Alpha_in"
     # The hostname form stays valid as the coarser match, so acknowledgement
     # files written before paths were used keep working.
-    assert "dangling:r1:route-map RM:BP_Plano_in" in finding.keys
+    assert "dangling:r1:route-map RM:Site_Alpha_in" in finding.keys
     assert "did you mean" in finding.detail
     assert all("did you mean" not in k for k in finding.keys)
 
@@ -269,15 +271,15 @@ def test_keys_are_generated_not_transcribed(tmp_path):
 
 def test_two_devices_sharing_a_hostname_get_different_keys(tmp_path):
     """Hostnames are not unique in this estate: two devices are called
-    WCS-ATL-ASR-R1 and two more are called Kernel. Keyed on hostname they
+    EDGE-R1 and two more are called Kernel. Keyed on hostname they
     produce the same string, and acknowledging one silently acknowledges the
     other's finding too."""
-    doc = {"device": {"hostname": "WCS-ATL-ASR-R1"},
-           "route_maps": [{"name": "BGP-to-OSPF", "prefix_lists": ["BCMOne-MNS2"]}]}
-    (tmp_path / "inventory" / "wcs" / "wcs-atl-asr-r1-21b484e9").mkdir(parents=True)
-    (tmp_path / "inventory" / "wcs" / "wcs-atl-asr-r1-3b8259c4").mkdir(parents=True)
-    for name in ("wcs-atl-asr-r1-21b484e9", "wcs-atl-asr-r1-3b8259c4"):
-        (tmp_path / "inventory" / "wcs" / name / "device.yaml").write_text(
+    doc = {"device": {"hostname": "EDGE-R1"},
+           "route_maps": [{"name": "BGP-to-OSPF", "prefix_lists": ["CORE-NETS"]}]}
+    (tmp_path / "inventory" / "site1" / "edge-r1-21b484e9").mkdir(parents=True)
+    (tmp_path / "inventory" / "site1" / "edge-r1-3b8259c4").mkdir(parents=True)
+    for name in ("edge-r1-21b484e9", "edge-r1-3b8259c4"):
+        (tmp_path / "inventory" / "site1" / name / "device.yaml").write_text(
             yaml.safe_dump(doc), encoding="utf-8")
 
     devices = load_devices(tmp_path)
@@ -289,11 +291,11 @@ def test_two_devices_sharing_a_hostname_get_different_keys(tmp_path):
 def test_acknowledging_one_of_a_shared_name_leaves_the_other_alerting(tmp_path):
     from netconfig_mirror.analysis import unacknowledged_dangling
 
-    doc = {"device": {"hostname": "WCS-ATL-ASR-R1"},
+    doc = {"device": {"hostname": "EDGE-R1"},
            "route_maps": [{"name": "RM", "prefix_lists": ["MISSING"]}]}
     for name in ("a-21b484e9", "a-3b8259c4"):
-        (tmp_path / "inventory" / "wcs" / name).mkdir(parents=True)
-        (tmp_path / "inventory" / "wcs" / name / "device.yaml").write_text(
+        (tmp_path / "inventory" / "site1" / name).mkdir(parents=True)
+        (tmp_path / "inventory" / "site1" / name / "device.yaml").write_text(
             yaml.safe_dump(doc), encoding="utf-8")
 
     devices = load_devices(tmp_path)
@@ -311,3 +313,53 @@ def test_a_hostname_keyed_acknowledgement_still_works(tmp_path):
                "route_maps": [{"name": "RM", "prefix_lists": ["MISSING"]}]},
     })
     assert unacknowledged_dangling(audit(devices, {"dangling:r1:route-map RM:MISSING"})) == []
+
+
+def test_a_declared_but_empty_prefix_list_is_not_reported_as_missing(tmp_path):
+    """An edge router in the estate carries `ip prefix-list TRANSIT-PREPEND
+    description ...` and no entries. Reporting that as "does not exist" sends
+    someone to create a list that is already there; the real question is where
+    its entries went.
+    """
+    devices = _mirror(tmp_path, {
+        "r1": {
+            "device": {"hostname": "r1"},
+            "prefix_lists": [{"name": "ASPrepend",
+                              "description": "AS-Prepend transit routes",
+                              "referenced_by": ["route-map OUT"]}],
+            "route_maps": [{"name": "OUT", "prefix_lists": ["ASPrepend"]}],
+        },
+    })
+    findings = audit(devices)
+
+    assert [f.kind for f in findings if f.kind in (DANGLING, EMPTY)] == [EMPTY]
+    empty = [f for f in findings if f.kind == EMPTY][0]
+    assert "no entries" in empty.detail
+    assert empty.key.startswith("empty:")
+
+
+def test_an_empty_prefix_list_still_fails_the_audit(tmp_path):
+    """Same effect on traffic as a missing one - the clause matches nothing -
+    so it must not be quietly downgraded to a warning."""
+    devices = _mirror(tmp_path, {
+        "r1": {
+            "device": {"hostname": "r1"},
+            "prefix_lists": [{"name": "ASPrepend", "description": "d",
+                              "referenced_by": ["route-map OUT"]}],
+            "route_maps": [{"name": "OUT", "prefix_lists": ["ASPrepend"]}],
+        },
+    })
+    assert unacknowledged_dangling(audit(devices))
+
+
+def test_an_empty_prefix_list_can_be_acknowledged(tmp_path):
+    devices = _mirror(tmp_path, {
+        "r1": {
+            "device": {"hostname": "r1"},
+            "prefix_lists": [{"name": "ASPrepend", "description": "d",
+                              "referenced_by": ["route-map OUT"]}],
+            "route_maps": [{"name": "OUT", "prefix_lists": ["ASPrepend"]}],
+        },
+    })
+    key = [f for f in audit(devices) if f.kind == EMPTY][0].key
+    assert not unacknowledged_dangling(audit(devices, acknowledged={key}))

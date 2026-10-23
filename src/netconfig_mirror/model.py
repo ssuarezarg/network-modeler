@@ -112,6 +112,7 @@ class PrefixListEntry:
 @dataclass
 class PrefixList:
     name: str
+    description: str | None = None
     entry_count: int = 0
     entries: list[PrefixListEntry] = field(default_factory=list)
     # Route-maps that match this list. Computed rather than parsed, and the

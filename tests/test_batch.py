@@ -46,7 +46,7 @@ def test_a_stored_collector_error_is_named_and_quoted():
     the fix."""
     from netconfig_mirror.batch import COLLECTOR_ERROR
 
-    output = ("ERROR: \nPattern not detected: 'WCS-DAL3-ASA1#' in output.\n\n"
+    output = ("ERROR: \nPattern not detected: 'EDGE-ASA1#' in output.\n\n"
               "Things you might try to fix this:\n"
               "1. Explicitly set your pattern using the expect_string argument.\n")
     attempt, detail, outcome = should_attempt(_capture(output))

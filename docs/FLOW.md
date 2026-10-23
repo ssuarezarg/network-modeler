@@ -283,7 +283,7 @@ to explain why.
 
 The key carries the device's path in the mirror, not its hostname, because
 **hostnames are not unique in this estate** — two devices are called
-`WCS-ATL-ASR-R1` and two more are called `Kernel`. Keyed on hostname they would
+`EDGE-R1` and two more are called `Kernel`. Keyed on hostname they would
 produce the same string, and acknowledging one would silently acknowledge the
 other's finding too.
 

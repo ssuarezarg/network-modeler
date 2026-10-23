@@ -142,7 +142,7 @@ def should_attempt(capture: CapturedConfig) -> tuple[bool, str | None, str]:
     When that text is recognisably the collector's own error, say so and quote
     its first line. The difference matters to whoever reads the run: "294 bytes"
     sends them to the database to find out what happened, while "Pattern not
-    detected: 'WCS-DAL3-ASA1#'" tells them the device, the cause and the fix.
+    detected: 'EDGE-ASA1#'" tells them the device, the cause and the fix.
     """
     if len(capture.output) >= SUSPICIOUS_CAPTURE_BYTES:
         return True, None, OK

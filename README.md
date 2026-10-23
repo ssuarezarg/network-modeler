@@ -338,7 +338,7 @@ appear, reported separately because different people fix them:
   recognisably an error either.
 - **`collector recorded an error`** — the stored text is the collector's own
   failure message, and its first line is quoted in the run output. One real
-  example reads `Pattern not detected: 'WCS-DAL3-ASA1#'`, which names the
+  example reads `Pattern not detected: 'EDGE-ASA1#'`, which names the
   device, the cause and the fix without anyone querying the database.
 
 Neither is handed to the parser. Doing so would surface as "platform unknown",

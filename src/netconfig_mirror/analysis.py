@@ -168,6 +168,11 @@ def render_comparison(a: DeviceDoc, b: DeviceDoc, result: Comparison) -> str:
     return "\n".join(lines) + "\n"
 
 
+DANGLING = "route-map matches a prefix-list that does not exist"
+EMPTY = "prefix-list is declared but has no entries"
+ORPHANED = "prefix-list referenced by nothing"
+
+
 @dataclass
 class Finding:
     hostname: str
@@ -184,17 +189,20 @@ class Finding:
     target: str = ""      # the name referred to
     acknowledged: bool = False
 
+    _PREFIX = {DANGLING: "dangling", EMPTY: "empty", ORPHANED: "orphan"}
+
     def _key_for(self, device: str) -> str:
-        if self.kind == DANGLING:
-            return f"dangling:{device}:{self.source}:{self.target}"
-        return f"orphan:{device}:{self.target}"
+        kind = self._PREFIX.get(self.kind, "finding")
+        if self.kind == ORPHANED:
+            return f"{kind}:{device}:{self.target}"
+        return f"{kind}:{device}:{self.source}:{self.target}"
 
     @property
     def key(self) -> str:
         """Stable identity for acknowledgement.
 
         Keyed on the mirror path rather than the hostname, because **hostnames
-        are not unique here**. Two devices share the name `WCS-ATL-ASR-R1` and
+        are not unique here**. Two devices share the name `EDGE-R1` and
         two more share `Kernel`; keyed on hostname they produce the same string,
         so acknowledging one would silently acknowledge the other's finding too.
 
@@ -220,9 +228,6 @@ class Finding:
         return (precise,) if precise == by_hostname else (precise, by_hostname)
 
 
-DANGLING = "route-map matches a prefix-list that does not exist"
-ORPHANED = "prefix-list referenced by nothing"
-
 
 def audit(devices: list[DeviceDoc],
           acknowledged: set[str] | None = None) -> list[Finding]:
@@ -244,7 +249,18 @@ def audit(devices: list[DeviceDoc],
                 applied.append((f"neighbor {neighbor.get('peer')}", entry.split()[0]))
 
         for where, name in applied:
-            if name not in lists:
+            entry = lists.get(name)
+            if entry is not None and not entry.get("entries"):
+                # Declared - it has a description - but holding nothing. An
+                # empty prefix-list matches nothing, so the effect is the same
+                # as a missing one; the fix is not, which is why it is reported
+                # apart. Something removed the entries, or they were never
+                # added.
+                findings.append(Finding(
+                    device.hostname, EMPTY,
+                    f"{where} uses {name}, which has no entries", device.path,
+                    source=where, target=name))
+            elif name not in lists:
                 suggestion = difflib.get_close_matches(
                     name, list(lists), n=1, cutoff=_SIMILAR_ENOUGH)
                 hint = f" (did you mean {suggestion[0]}?)" if suggestion else ""
@@ -266,6 +282,9 @@ def audit(devices: list[DeviceDoc],
     return findings
 
 
+ACTIONABLE = (DANGLING, EMPTY)
+
+
 def unacknowledged_dangling(findings: list[Finding]) -> list[Finding]:
     """Dangling references nobody has taken responsibility for yet.
 
@@ -273,12 +292,12 @@ def unacknowledged_dangling(findings: list[Finding]) -> list[Finding]:
     raised goes red every night, and then nobody reads it — which costs you the
     next one.
     """
-    return [f for f in findings if f.kind == DANGLING and not f.acknowledged]
+    return [f for f in findings if f.kind in ACTIONABLE and not f.acknowledged]
 
 
 def render_audit(findings: list[Finding], devices: list[DeviceDoc],
                  *, full: bool = False, per_device: int = 8) -> str:
-    dangling = [f for f in findings if f.kind == DANGLING]
+    dangling = [f for f in findings if f.kind in ACTIONABLE]
     orphaned = [f for f in findings if f.kind == ORPHANED]
 
     new_dangling = [f for f in dangling if not f.acknowledged]

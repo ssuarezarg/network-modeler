@@ -28,7 +28,8 @@ _PREFIX_LIST = re.compile(
     re.I,
 )
 
-_PREFIX_LIST_OTHER = re.compile(r"^ip(?:v6)?\s+prefix-list\s+\S+\s+description\b", re.I)
+_PREFIX_LIST_DESCRIPTION = re.compile(
+    r"^ip(?:v6)?\s+prefix-list\s+(?P<name>\S+)\s+description\s+(?P<text>.+)$", re.I)
 
 _ROUTE_MAP = re.compile(
     r"^route-map\s+(?P<name>\S+)\s+(?P<action>permit|deny)\s+(?P<seq>\d+)", re.I)
@@ -55,9 +56,14 @@ def parse_prefix_lists(doc: ConfigDocument) -> list[PrefixList]:
                                            PrefixList(name=match.group("name")))
             prefix_list.entries.append(entry)
             doc.consume(block)
-        elif _PREFIX_LIST_OTHER.match(block.header):
-            # A description carries no policy; consume it so it does not read as
-            # unrecognised, but do not model it.
+        elif described := _PREFIX_LIST_DESCRIPTION.match(block.header):
+            # A description carries no policy, but it does prove the list was
+            # declared. Recording it separates "this name does not exist" from
+            # "this list exists and is empty" - the same effect on traffic,
+            # different causes and different fixes.
+            name = described.group("name")
+            prefix_list = lists.setdefault(name, PrefixList(name=name))
+            prefix_list.description = described.group("text").strip()
             doc.consume(block)
 
     for prefix_list in lists.values():
