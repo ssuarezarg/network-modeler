@@ -39,6 +39,14 @@ class Interface:
     nameif: str | None = None
     security_level: str | None = None
     standby_ip: str | None = None
+    # VTI. A route-based tunnel carries its whole VPN configuration here
+    # rather than in a crypto map, so an interface that is not read for these
+    # loses the tunnel entirely - and, because the block is consumed whole,
+    # loses it while reporting the lines as modelled.
+    tunnel_source: str | None = None
+    tunnel_destination: str | None = None
+    tunnel_mode: str | None = None
+    tunnel_protection: str | None = None
 
 
 @dataclass
@@ -288,10 +296,25 @@ class TunnelGroup:
 
 
 @dataclass
+class IpsecProfile:
+    """Route-based VPN. Applied to a tunnel interface rather than matched by
+    an ACL, so a profile and a crypto map are two different ways of building a
+    tunnel and only one of them is visible from the access-lists."""
+
+    name: str
+    ikev1_transform_sets: list[str] = field(default_factory=list)
+    ikev2_proposals: list[str] = field(default_factory=list)
+    pfs: str | None = None
+    lifetime: str | None = None
+    referenced_by: list[str] = field(default_factory=list)
+
+
+@dataclass
 class Vpn:
     enabled_on: list[str] = field(default_factory=list)
     ike_policies: list[IkePolicy] = field(default_factory=list)
     ipsec_proposals: list[IpsecProposal] = field(default_factory=list)
+    ipsec_profiles: list[IpsecProfile] = field(default_factory=list)
     crypto_maps: list[CryptoMap] = field(default_factory=list)
     tunnel_groups: list[TunnelGroup] = field(default_factory=list)
 

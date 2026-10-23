@@ -26,6 +26,7 @@ from ..model import (
     DeviceModel,
     IkePolicy,
     Interface,
+    IpsecProfile,
     IpsecProposal,
     NatRule,
     NetworkObject,
@@ -48,7 +49,9 @@ _ACKNOWLEDGED = re.compile(
     r"|console\b|management-access\b|dhcpd\b|mtu\b|monitor-interface\b"
     r"|failover\b|icmp\b|ip\b|ipv6\b|auth-prompt\b|fragment\b|quit\b"
     r"|user-identity\b|subject-name\b|zonelabs\b|vpn-addr-assign\b"
-    r"|crypto ca\b|crypto key\b|ssl\b|tls-proxy\b|eou\b|aaa\b|aaa-server\b"
+    r"|crypto ca\b|crypto key\b|crypto isakmp\b"
+    r"|crypto ipsec (?:security-association|df-bit|fragmentation)\b"
+    r"|dynamic-access-policy-record\b|ssl\b|tls-proxy\b|eou\b|aaa\b|aaa-server\b"
     r"|logging\b|snmp-server\b|ssh\b|telnet\b|router\b|end\b|exit\b"
     r")"
 )
@@ -119,6 +122,14 @@ def _interfaces(doc: ConfigDocument) -> list[Interface]:
                 interface.ipv6.append(line.split(None, 2)[2])
             elif line.startswith("vlan "):
                 interface.access_vlan = line.split(None, 1)[1]
+            elif line.startswith("tunnel source "):
+                interface.tunnel_source = line.split(None, 2)[2]
+            elif line.startswith("tunnel destination "):
+                interface.tunnel_destination = line.split(None, 2)[2]
+            elif line.startswith("tunnel mode "):
+                interface.tunnel_mode = line.split(None, 2)[2]
+            elif line.startswith("tunnel protection ipsec profile "):
+                interface.tunnel_protection = line.split()[-1]
         interfaces.append(interface)
         doc.consume(block)
     return interfaces
@@ -241,6 +252,7 @@ def _vpn(doc: ConfigDocument) -> Vpn | None:
     vpn = Vpn()
     _ike_policies(doc, vpn)
     _proposals(doc, vpn)
+    _ipsec_profiles(doc, vpn)
     _crypto_maps(doc, vpn)
     _tunnel_groups(doc, vpn)
 
@@ -249,7 +261,7 @@ def _vpn(doc: ConfigDocument) -> Vpn | None:
         doc.consume(block)
 
     if not any((vpn.enabled_on, vpn.ike_policies, vpn.ipsec_proposals,
-                vpn.crypto_maps, vpn.tunnel_groups)):
+                vpn.ipsec_profiles, vpn.crypto_maps, vpn.tunnel_groups)):
         return None
     return vpn
 
@@ -290,6 +302,23 @@ def _proposals(doc: ConfigDocument, vpn: Vpn) -> None:
         proposal = IpsecProposal(name=block.header.split()[4], version="ikev2")
         proposal.transforms = [child.strip() for child in block.children]
         vpn.ipsec_proposals.append(proposal)
+        doc.consume(block)
+
+
+def _ipsec_profiles(doc: ConfigDocument, vpn: Vpn) -> None:
+    for block in doc.find(r"crypto ipsec profile\s+"):
+        profile = IpsecProfile(name=block.header.split()[3])
+        for child in block.children:
+            words = child.strip().split()
+            if words[:3] == ["set", "ikev1", "transform-set"]:
+                profile.ikev1_transform_sets.extend(words[3:])
+            elif words[:3] == ["set", "ikev2", "ipsec-proposal"]:
+                profile.ikev2_proposals.extend(words[3:])
+            elif words[:2] == ["set", "pfs"]:
+                profile.pfs = words[2] if len(words) > 2 else "enabled"
+            elif words[:4] == ["set", "security-association", "lifetime", "seconds"]:
+                profile.lifetime = words[4]
+        vpn.ipsec_profiles.append(profile)
         doc.consume(block)
 
 
@@ -420,6 +449,14 @@ def _link_references(model: DeviceModel) -> None:
                         f"crypto map {crypto_map.name} {entry.seq}")
         for group in model.vpn.tunnel_groups:
             group.referenced_by = peers.get(group.name, [])
+
+        profiles = {p.name: p for p in model.vpn.ipsec_profiles}
+        for interface in model.interfaces:
+            if not interface.tunnel_protection:
+                continue
+            profile = profiles.get(interface.tunnel_protection)
+            if profile is not None:
+                profile.referenced_by.append(f"interface {interface.name}")
 
 
 def _acknowledge_remainder(doc: ConfigDocument) -> None:

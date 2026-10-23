@@ -64,6 +64,22 @@ tunnel-group 198.51.100.99 type ipsec-l2l
 tunnel-group 198.51.100.99 ipsec-attributes
  ikev1 pre-shared-key <redacted:bbbb2222>
 logging host inside 10.1.0.50
+interface Tunnel1
+ nameif aws-tunnel-1
+ ip address 169.254.10.2 255.255.255.252
+ tunnel source interface outside
+ tunnel destination 198.51.100.200
+ tunnel mode ipsec ipv4
+ tunnel protection ipsec profile ipsec-vpn-aws-0
+crypto ipsec profile ipsec-vpn-aws-0
+ set ikev1 transform-set ESP-AES256-SHA
+ set pfs group2
+ set security-association lifetime seconds 3600
+crypto ipsec profile UNUSED-PROFILE
+ set ikev2 ipsec-proposal AES256
+crypto ipsec security-association pmtu-aging infinite
+crypto isakmp identity address
+dynamic-access-policy-record DfltAccessPolicy
 """
 
 
@@ -196,3 +212,30 @@ def test_everything_in_the_fixture_is_accounted_for():
 
     assert doc.unconsumed_summary() == []
     assert doc.accounted() == 1.0
+
+
+def test_a_route_based_tunnel_keeps_its_vpn_configuration():
+    """A VTI carries its whole VPN on the interface rather than in a crypto
+    map. Consuming the interface block without reading these lines lost the
+    tunnel while reporting those lines as modelled."""
+    tunnel = [i for i in _model().interfaces if i.name == "Tunnel1"][0]
+
+    assert tunnel.tunnel_source == "interface outside"
+    assert tunnel.tunnel_destination == "198.51.100.200"
+    assert tunnel.tunnel_mode == "ipsec ipv4"
+    assert tunnel.tunnel_protection == "ipsec-vpn-aws-0"
+
+
+def test_an_ipsec_profile_knows_which_tunnel_uses_it():
+    profiles = {p.name: p for p in _model().vpn.ipsec_profiles}
+
+    assert profiles["ipsec-vpn-aws-0"].pfs == "group2"
+    assert profiles["ipsec-vpn-aws-0"].lifetime == "3600"
+    assert profiles["ipsec-vpn-aws-0"].referenced_by == ["interface Tunnel1"]
+
+
+def test_a_profile_no_tunnel_applies_is_visible():
+    """The route-based equivalent of a tunnel-group no crypto map points at."""
+    profiles = {p.name: p for p in _model().vpn.ipsec_profiles}
+
+    assert profiles["UNUSED-PROFILE"].referenced_by == []
