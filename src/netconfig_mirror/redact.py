@@ -75,6 +75,12 @@ _RULES: list[tuple[str, re.Pattern[str]]] = [
     # snmp-server community <string> [RO|RW|acl]
     ("snmp-community", re.compile(
         r"(?P<pre>^\s*snmp-server community\s+)(?P<secret>\S+)", re.M | re.I)),
+    # The trap-receiver form carries the same string and had no rule at all:
+    # `snmp-server host <iface> <addr> [version 2c] <community>`. Found by
+    # widening the net, which is what the net is for.
+    ("snmp-host-community", re.compile(
+        r"(?P<pre>^\s*snmp-server host\s+.*?\bcommunity\s+)(?P<secret>\S+)",
+        re.M | re.I)),
     # snmp-server user: auth and priv keys, each on the same line
     ("snmp-v3-auth", re.compile(
         r"(?P<pre>^\s*snmp-server user\s+.*?\bauth\s+\S+\s+(?:encrypted\s+)?)"
@@ -156,7 +162,11 @@ _RULES: list[tuple[str, re.Pattern[str]]] = [
 # opposite of being invisibly absent from a list of patterns.
 _CREDENTIAL_WORD = (
     r"(?:pre-shared-key|key-string|server-key|authentication-key"
-    r"|message-digest-key|shared-secret|password|passwd|secret|community"
+    # `community` is deliberately absent. In IOS it is overwhelmingly BGP -
+    # `set community`, `send-community extended`, `ip bgp-community new-format`
+    # - and including it refused 46 of 71 devices on the first real run. It is
+    # a secret only after `snmp-server`, which the enumerated commands cover.
+    r"|message-digest-key|shared-secret|password|passwd|secret"
     # Bare `key`, but not `key-chain` / `key-exchange`, which name a thing
     # rather than carry one.
     r"|key(?![-\w]))"
@@ -170,6 +180,7 @@ _CREDENTIAL_WORD = (
 _SUSPECT_COMMANDS = (
     r"^\s*(?:!*enable (?:secret|password)|username\s+\S+.*\b(?:secret|password)\b"
     r"|.*\bpre-shared-key\b|.*\bcrypto isakmp key\b|snmp-server (?:community|user)\b"
+    r"|snmp-server host\s+.*\bcommunity\b"
     r"|.*\bneighbor\s+\S+\s+password\b|key-string\b|.*(?:tacacs|radius)-server.*\bkey\b"
     r"|.*\bppp (?:chap|pap).*\bpassword\b|ldap-login-password\b)"
 )
@@ -193,6 +204,10 @@ _BENIGN = re.compile(
     r"|^\s*crypto key\s+(?:generate|zeroize)\b"
     r"|\bkey-chain\s+\S+\s*$"
     r"|\bkey-exchange\b"
+    # Free text. It trips the word-based net on wording alone, and a device
+    # refusing every night over its own description is the kind of noise that
+    # teaches people to ignore the refusal that matters.
+    r"|^\s*description\b"
     # `community` as a BGP or SNMP *view* name rather than a string.
     r"|\bsnmp-server (?:community-map|group)\b",
     re.I,

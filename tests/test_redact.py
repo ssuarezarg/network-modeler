@@ -245,3 +245,32 @@ def test_the_net_catches_a_spelling_no_rule_knows():
     """The point of the net. It used to enumerate the same spellings as the
     rules, so a rule missing one left the net missing it too."""
     assert audit_residuals(f" some-vendor-shared-secret {SECRET}\n")
+
+
+BGP_COMMUNITIES = """ set community 65000:100 additive
+ neighbor 68.64.76.169 send-community both
+ send-community extended
+ip bgp-community new-format
+ description *** carrier circuit - key account contact ***
+"""
+
+
+def test_bgp_communities_are_not_credentials():
+    """`community` in IOS is overwhelmingly BGP. Treating the bare word as a
+    credential refused 46 of 71 devices on the first real run - a redaction
+    refusal skips the device, so a net this broad silently stops mirroring
+    most of the estate."""
+    out, _ = redact(BGP_COMMUNITIES, KEY)
+
+    assert out == BGP_COMMUNITIES
+    assert not audit_residuals(out)
+
+
+def test_an_snmp_trap_receiver_community_is_a_credential():
+    """The same word after `snmp-server host` is the community string, and it
+    had no rule at all until widening the net pointed at it."""
+    out, report = redact(
+        "snmp-server host inside 10.0.0.1 community TrapString version 2c\n", KEY)
+
+    assert "TrapString" not in out
+    assert report.counts.get("snmp-host-community") == 1
