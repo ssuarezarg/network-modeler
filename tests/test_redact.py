@@ -173,3 +173,75 @@ def test_snmp_engine_id_is_not_reported_as_a_leak():
     line = ("snmp-server user u g v3 engineID 80000009fe9455adb4856c56308530364cd3 "
             "encrypted auth sha <redacted:aabbccdd>\n")
     assert not audit_residuals(line)
+
+
+SECRET = "N0tARealKey2026"
+
+
+def _redacted(line: str) -> str:
+    out, _ = redact(line if line.endswith("\n") else line + "\n", KEY)
+    return out
+
+
+def test_interface_and_protocol_keys_are_redacted():
+    """None of these are exotic. They sit on ordinary IOS interfaces across the
+    estate, and every one was reaching the mirror in cleartext while the
+    residual audit reported nothing."""
+    for line in (
+        f" ip ospf message-digest-key 1 md5 {SECRET}",
+        f" ip ospf authentication-key {SECRET}",
+        f" standby 1 authentication md5 key-string {SECRET}",
+        f" standby 1 authentication text {SECRET}",
+        f"ntp authentication-key 1 md5 {SECRET}",
+    ):
+        assert SECRET not in _redacted(line), line
+
+
+def test_asa_shared_keys_are_redacted():
+    """`server-key` under aaa-server, and the failover key. Neither is spelled
+    `key`, which is why both were missed."""
+    assert SECRET not in _redacted(f" server-key {SECRET}")
+    assert SECRET not in _redacted(f"failover key {SECRET}")
+
+
+def test_a_password_at_the_end_of_an_unfamiliar_line():
+    assert SECRET not in _redacted(
+        f" http-proxy 10.0.0.1 port 80 username operator password {SECRET}")
+
+
+def test_a_key_chain_keeps_its_identifiers_and_loses_its_secrets():
+    """`\\s` matches a newline, so a rule anchored on one line reached into the
+    next: ` key 1\\n  key-string <secret>` had the *word* `key-string`
+    tokenised, leaving the secret beside it and a redaction marker on the line
+    that made the audit read it as handled."""
+    out = _redacted(f"key chain OSPF-KEYS\n key 1\n  key-string {SECRET}\n")
+
+    assert SECRET not in out
+    assert " key 1\n" in out          # the identifier is model data
+    assert "key-string <redacted:" in out
+
+
+def test_credential_words_that_carry_no_secret_are_left_alone():
+    """Each of these appears in the LAC1 firewall. Redacting a reference breaks
+    the model; flagging one fails a device every night for nothing."""
+    for line in (
+        "ssh key-exchange group dh-group14-sha256",
+        "key chain OSPF-KEYS",
+        " key 1",
+        "crypto key generate rsa modulus 2048",
+        " authentication key-chain OSPF-KEYS",
+        "aaa-server cisco protocol ldap",
+        " set ikev1 transform-set ESP-AES-256",
+        "no service password-encryption",
+        " password-storage enable",
+        "username guest nopassword",
+    ):
+        out = _redacted(line)
+        assert out.strip() == line.strip(), line
+        assert not audit_residuals(out), line
+
+
+def test_the_net_catches_a_spelling_no_rule_knows():
+    """The point of the net. It used to enumerate the same spellings as the
+    rules, so a rule missing one left the net missing it too."""
+    assert audit_residuals(f" some-vendor-shared-secret {SECRET}\n")

@@ -81,8 +81,11 @@ _RULES: list[tuple[str, re.Pattern[str]]] = [
     ("aaa-key", re.compile(
         r"(?P<pre>^\s*(?:tacacs-server|radius-server)\s+(?:host\s+\S+\s+)?key"
         r"(?:\s+\d+)?\s+)(?P<secret>\S+)", re.M | re.I)),
+    # `key 7 <hash>` or `key <secret>` under a tacacs/radius server. The
+    # negative lookahead keeps it off `key 1` inside a key chain, where the
+    # number is the key's identifier and belongs in the model.
     ("aaa-key-sub", re.compile(
-        r"(?P<pre>^\s+key\s+(?:\d+\s+)?)(?P<secret>\S+)", re.M | re.I)),
+        r"(?P<pre>^\s+key\s+(?!\d+\s*$)(?:\d+\s+)?)(?P<secret>\S+)", re.M | re.I)),
     # A credential on its own indented line. IOS-XR writes:
     #     username cisco
     #      group root-lr
@@ -100,20 +103,67 @@ _RULES: list[tuple[str, re.Pattern[str]]] = [
         r"(?P<pre>\bpassword\s+)(?P<secret>\S+)(?=\s+encrypted\b)", re.M | re.I)),
     ("ldap", re.compile(
         r"(?P<pre>^\s*ldap-login-password\s+)(?P<secret>\S+)", re.M | re.I)),
+    # Interface and protocol authentication. These are not exotic: they sit on
+    # ordinary IOS interfaces across the estate, and every one of them was
+    # going to the mirror in cleartext.
+    ("ospf-key", re.compile(
+        r"(?P<pre>^\s*ip ospf (?:message-digest-key\s+\d+\s+md5|authentication-key)"
+        r"(?:\s+\d+)?\s+)(?P<secret>\S+)", re.M | re.I)),
+    ("hsrp-key", re.compile(
+        r"(?P<pre>^\s*standby\s+\d+\s+authentication\s+"
+        r"(?:md5\s+key-string(?:\s+\d+)?|text)\s+)(?P<secret>\S+)", re.M | re.I)),
+    ("ntp-key", re.compile(
+        r"(?P<pre>^\s*ntp authentication-key\s+\d+\s+\S+\s+)(?P<secret>\S+)",
+        re.M | re.I)),
+    # ASA: the failover shared key, and the RADIUS/TACACS secret under
+    # `aaa-server`, which is spelled `server-key` and not `key`.
+    ("asa-shared-key", re.compile(
+        r"(?P<pre>^\s*(?:failover\s+key|server-key)(?:\s+\d+)?\s+)(?P<secret>\S+)",
+        re.M | re.I)),
+    # Last resort: a password as the final value on a line nothing above
+    # claimed - `http-proxy ... username u password <value>`. Kept last so the
+    # specific rules name the credential they caught.
+    ("inline-password", re.compile(
+        r"(?P<pre>\bpassword\s+)(?P<secret>\S+)\s*$", re.M | re.I)),
 ]
 
 # Lines that must contain a redaction token after processing. This is the
-# fail-closed net: it is deliberately broader than the rules above, so a
-# credential format we have never seen is caught instead of published.
-_SUSPECT_LINE = re.compile(
+# fail-closed net.
+#
+# It used to enumerate the same spellings as the rules above, which meant it
+# could only catch a credential someone had already thought of - and a rule
+# missing a spelling left the net missing it too. Six spellings were leaking
+# in cleartext with this audit reporting zero residuals, among them OSPF,
+# HSRP and NTP keys on ordinary IOS interfaces.
+#
+# So the net is keyed on credential *words* followed by a value, independent
+# of any command it knows. Everything that then reads as a false positive is
+# listed in `_BENIGN` by name, where it is visible and reviewable - the
+# opposite of being invisibly absent from a list of patterns.
+_CREDENTIAL_WORD = (
+    r"(?:pre-shared-key|key-string|server-key|authentication-key"
+    r"|message-digest-key|shared-secret|password|passwd|secret|community"
+    # Bare `key`, but not `key-chain` / `key-exchange`, which name a thing
+    # rather than carry one.
+    r"|key(?![-\w]))"
+)
+# The enumerated commands stay. Some credentials are not spelled with any
+# credential word at all - `snmp-server user ... auth md5 <key> priv aes-128
+# <key>` names them `auth` and `priv` - so the word-based net cannot replace
+# this list. It adds to it. Replacing one net with a broader-looking one is
+# how coverage disappears quietly; the test for two secrets on an SNMPv3 line
+# is what caught that happening here.
+_SUSPECT_COMMANDS = (
     r"^\s*(?:!*enable (?:secret|password)|username\s+\S+.*\b(?:secret|password)\b"
     r"|.*\bpre-shared-key\b|.*\bcrypto isakmp key\b|snmp-server (?:community|user)\b"
     r"|.*\bneighbor\s+\S+\s+password\b|key-string\b|.*(?:tacacs|radius)-server.*\bkey\b"
-    r"|.*\bppp (?:chap|pap).*\bpassword\b|ldap-login-password\b)",
-    re.I,
+    r"|.*\bppp (?:chap|pap).*\bpassword\b|ldap-login-password\b)"
 )
+_SUSPECT_LINE = re.compile(
+    rf"(?:{_SUSPECT_COMMANDS})|(?:^(?!\s*no\s).*\b{_CREDENTIAL_WORD}\s+\S)", re.I)
 
-# Lines matching a suspect pattern that are nonetheless safe: no value present.
+# Lines matching a suspect pattern that are nonetheless safe: no value present,
+# or the value is a reference rather than a secret.
 _BENIGN = re.compile(
     r"^\s*(?:no\s+|.*\b(?:password-storage|password-policy|password encryption aes)\b"
     r"|username\s+\S+\s+(?:privilege\s+\d+\s+)?(?:nopassword|autocommand)\b"
@@ -122,7 +172,15 @@ _BENIGN = re.compile(
     r"|snmp-server user\s+(?!.*\bauth\b).*$"
     # Credential keyword with the value already stripped by the collector:
     # `!!enable secret 9` with nothing following it.
-    r"|!*enable\s+(?:secret|password)(?:\s+\d+)?\s*$)",
+    r"|!*enable\s+(?:secret|password)(?:\s+\d+)?\s*$)"
+    # Names and knobs that contain a credential word but carry no secret.
+    r"|^\s*key chain\b"
+    r"|^\s*key\s+\d+\s*$"
+    r"|^\s*crypto key\s+(?:generate|zeroize)\b"
+    r"|\bkey-chain\s+\S+\s*$"
+    r"|\bkey-exchange\b"
+    # `community` as a BGP or SNMP *view* name rather than a string.
+    r"|\bsnmp-server (?:community-map|group)\b",
     re.I,
 )
 
@@ -208,6 +266,18 @@ def redact(config_text: str, key: bytes) -> tuple[str, RedactionReport]:
     report = RedactionReport()
     text = config_text
 
+    def _apply(name: str, pattern: re.Pattern[str], _sub) -> None:
+        nonlocal text
+        # Line by line, never across the whole text. Every rule is anchored
+        # with `^` or `$`, but `\s` matches a newline, so `^\s+key\s+(\d+\s+)?
+        # (?P<secret>\S+)` applied to the whole config consumed ` key 1\n` and
+        # tokenised the first word of the *next* line. In a key chain that is
+        # the word `key-string`, which left the secret beside it in cleartext
+        # and put a `<redacted:` marker on the line - so the residual audit
+        # read it as handled. Scoping each rule to one line removes the whole
+        # class rather than this one instance of it.
+        text = "\n".join(pattern.sub(_sub, line) for line in text.split("\n"))
+
     for name, pattern in _RULES:
         def _sub(match: re.Match[str], _name: str = name) -> str:
             secret = match.group("secret")
@@ -224,7 +294,7 @@ def redact(config_text: str, key: bytes) -> tuple[str, RedactionReport]:
             report.counts[_name] = report.counts.get(_name, 0) + 1
             return f"{match.group('pre')}{token(secret, key)}"
 
-        text = pattern.sub(_sub, text)
+        _apply(name, pattern, _sub)
 
     report.residuals = audit_residuals(text)
     return text, report
