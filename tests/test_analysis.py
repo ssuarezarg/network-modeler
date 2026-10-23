@@ -202,9 +202,14 @@ def test_a_finding_key_ignores_the_suggestion_text(tmp_path):
                "route_maps": [{"name": "RM", "prefix_lists": ["BP_Plano_in"]}]},
     })
     finding = [f for f in audit(devices) if f.kind == DANGLING][0]
-    assert finding.key == "dangling:r1:route-map RM:BP_Plano_in"
+    # Keyed on the mirror path, which is unique; the hostname form stays valid
+    # as the coarser match for files written before paths were used.
+    assert finding.key == "dangling:dc4/r1:route-map RM:BP_Plano_in"
+    # The hostname form stays valid as the coarser match, so acknowledgement
+    # files written before paths were used keep working.
+    assert "dangling:r1:route-map RM:BP_Plano_in" in finding.keys
     assert "did you mean" in finding.detail
-    assert "did you mean" not in finding.key
+    assert all("did you mean" not in k for k in finding.keys)
 
 
 def test_an_acknowledged_finding_stays_in_the_report(tmp_path):
@@ -260,3 +265,49 @@ def test_keys_are_generated_not_transcribed(tmp_path):
     })
     key = unacknowledged_dangling(audit(devices))[0].key
     assert unacknowledged_dangling(audit(devices, {key})) == []
+
+
+def test_two_devices_sharing_a_hostname_get_different_keys(tmp_path):
+    """Hostnames are not unique in this estate: two devices are called
+    WCS-ATL-ASR-R1 and two more are called Kernel. Keyed on hostname they
+    produce the same string, and acknowledging one silently acknowledges the
+    other's finding too."""
+    doc = {"device": {"hostname": "WCS-ATL-ASR-R1"},
+           "route_maps": [{"name": "BGP-to-OSPF", "prefix_lists": ["BCMOne-MNS2"]}]}
+    (tmp_path / "inventory" / "wcs" / "wcs-atl-asr-r1-21b484e9").mkdir(parents=True)
+    (tmp_path / "inventory" / "wcs" / "wcs-atl-asr-r1-3b8259c4").mkdir(parents=True)
+    for name in ("wcs-atl-asr-r1-21b484e9", "wcs-atl-asr-r1-3b8259c4"):
+        (tmp_path / "inventory" / "wcs" / name / "device.yaml").write_text(
+            yaml.safe_dump(doc), encoding="utf-8")
+
+    devices = load_devices(tmp_path)
+    keys = [f.key for f in audit(devices) if f.kind == DANGLING]
+    assert len(keys) == 2
+    assert len(set(keys)) == 2
+
+
+def test_acknowledging_one_of_a_shared_name_leaves_the_other_alerting(tmp_path):
+    from netconfig_mirror.analysis import unacknowledged_dangling
+
+    doc = {"device": {"hostname": "WCS-ATL-ASR-R1"},
+           "route_maps": [{"name": "RM", "prefix_lists": ["MISSING"]}]}
+    for name in ("a-21b484e9", "a-3b8259c4"):
+        (tmp_path / "inventory" / "wcs" / name).mkdir(parents=True)
+        (tmp_path / "inventory" / "wcs" / name / "device.yaml").write_text(
+            yaml.safe_dump(doc), encoding="utf-8")
+
+    devices = load_devices(tmp_path)
+    first = audit(devices)[0].key
+    assert len(unacknowledged_dangling(audit(devices, {first}))) == 1
+
+
+def test_a_hostname_keyed_acknowledgement_still_works(tmp_path):
+    """Files written before paths were used must keep working — and that form
+    is deliberately coarser: it covers every device of that name."""
+    from netconfig_mirror.analysis import unacknowledged_dangling
+
+    devices = _mirror(tmp_path, {
+        "r1": {"device": {"hostname": "r1"},
+               "route_maps": [{"name": "RM", "prefix_lists": ["MISSING"]}]},
+    })
+    assert unacknowledged_dangling(audit(devices, {"dangling:r1:route-map RM:MISSING"})) == []

@@ -184,19 +184,40 @@ class Finding:
     target: str = ""      # the name referred to
     acknowledged: bool = False
 
+    def _key_for(self, device: str) -> str:
+        if self.kind == DANGLING:
+            return f"dangling:{device}:{self.source}:{self.target}"
+        return f"orphan:{device}:{self.target}"
+
     @property
     def key(self) -> str:
         """Stable identity for acknowledgement.
 
+        Keyed on the mirror path rather than the hostname, because **hostnames
+        are not unique here**. Two devices share the name `WCS-ATL-ASR-R1` and
+        two more share `Kernel`; keyed on hostname they produce the same string,
+        so acknowledging one would silently acknowledge the other's finding too.
+
         Built from the structural parts, never from `detail`: the rendered
         sentence carries a "did you mean …?" suggestion that changes as the
         device's configuration changes, and an acknowledgement keyed on that
-        would silently stop matching — the finding would start alerting again
-        with nothing to explain why.
+        would silently stop matching.
         """
-        if self.kind == DANGLING:
-            return f"dangling:{self.hostname}:{self.source}:{self.target}"
-        return f"orphan:{self.hostname}:{self.target}"
+        device = self.path.split("/", 1)[-1] if self.path else self.hostname
+        return self._key_for(device)
+
+    @property
+    def keys(self) -> tuple[str, ...]:
+        """Every string that acknowledges this finding.
+
+        The hostname form is still honoured so acknowledgement files written
+        before paths were used keep working. It is deliberately the coarser
+        match - it covers the finding on *every* device of that name - which is
+        why `--keys` emits the path form instead.
+        """
+        precise = self.key
+        by_hostname = self._key_for(self.hostname)
+        return (precise,) if precise == by_hostname else (precise, by_hostname)
 
 
 DANGLING = "route-map matches a prefix-list that does not exist"
@@ -240,7 +261,7 @@ def audit(devices: list[DeviceDoc],
 
     known = acknowledged or set()
     for finding in findings:
-        finding.acknowledged = finding.key in known
+        finding.acknowledged = any(k in known for k in finding.keys)
 
     return findings
 

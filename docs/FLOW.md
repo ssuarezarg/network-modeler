@@ -281,8 +281,16 @@ changes as the device changes. An acknowledgement keyed on the sentence would
 silently stop matching, and the finding would start alerting again with nothing
 to explain why.
 
-The key carries the hostname, so acknowledging a finding on one device does not
-cover the same mistake on another — which is right: it needs fixing there too.
+The key carries the device's path in the mirror, not its hostname, because
+**hostnames are not unique in this estate** — two devices are called
+`WCS-ATL-ASR-R1` and two more are called `Kernel`. Keyed on hostname they would
+produce the same string, and acknowledging one would silently acknowledge the
+other's finding too.
+
+So acknowledging a finding on one device does not cover the same mistake on
+another, which is right: it needs fixing there too. A key written as a bare
+hostname is still honoured, as the deliberately coarser match covering every
+device of that name.
 
 ---
 
