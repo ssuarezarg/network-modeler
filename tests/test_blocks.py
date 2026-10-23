@@ -126,3 +126,28 @@ def test_nested_lines_are_counted_against_their_parent():
 
 def test_a_command_seen_once_is_not_dressed_up_as_a_family():
     assert _census(ASA_SHAPED)["hostname"] == (1, 0)
+
+
+def test_a_large_vocabulary_that_repeats_heavily_is_still_subdivided():
+    """`crypto` on the LAC1 firewall: five second words across 89 blocks, and
+    they are the largest thing in the configuration. Collapsing it to one row
+    hides that behind the one word that says least about it."""
+    text = "".join(
+        f"crypto {kind} {n}\n stuff\n"
+        for kind in ("ipsec", "map", "ca", "ikev1", "ikev2")
+        for n in range(8)
+    )
+    census = _census(text)
+
+    assert census["crypto ipsec"] == (8, 8)
+    assert "crypto" not in census
+
+
+def test_too_few_blocks_to_tell_are_left_alone():
+    """Two `group-policy <name>` blocks sharing one name look exactly like a
+    keyword. Printing the name as though it were one puts a customer's
+    identifier in a census that gets pasted into chat."""
+    text = "group-policy Acme attributes\n vpn-idle-timeout 30\n" * 2
+    census = _census(text)
+
+    assert census["group-policy"] == (2, 2)

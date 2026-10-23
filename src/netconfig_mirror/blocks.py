@@ -211,6 +211,15 @@ class ConfigDocument:
 # bury the one fact that matters, that it is a thousand lines.
 _MAX_KEYWORD_VARIANTS = 4
 _MIN_BLOCKS_PER_VARIANT = 2
+# A vocabulary larger than _MAX_KEYWORD_VARIANTS is still a vocabulary when
+# every word in it repeats heavily. `crypto` on a VPN head-end has five second
+# words - ipsec, map, ca, ikev1, ikev2 - across 89 blocks, and collapsing it to
+# one row hides the largest thing in the configuration behind the one word that
+# says least about it.
+_STRONG_REPETITION = 8
+# Below this there is no evidence either way, and guessing wrong prints a
+# customer's group-policy or server name as though it were a command keyword.
+_MIN_BLOCKS_TO_SUBDIVIDE = 4
 
 
 def _subdivide(command: str, blocks: list["Block"]) -> list[tuple[str, list["Block"]]]:
@@ -219,9 +228,12 @@ def _subdivide(command: str, blocks: list["Block"]) -> list[tuple[str, list["Blo
         words = block.header.strip().split()
         seconds.setdefault(words[1] if len(words) > 1 else "", []).append(block)
 
+    repeats = (len(seconds) <= _MAX_KEYWORD_VARIANTS
+               or len(blocks) >= len(seconds) * _STRONG_REPETITION)
     keyword_like = (
-        len(seconds) <= _MAX_KEYWORD_VARIANTS
-        and len(blocks) >= len(seconds) * _MIN_BLOCKS_PER_VARIANT
+        repeats
+        and len(blocks) >= max(_MIN_BLOCKS_TO_SUBDIVIDE,
+                               len(seconds) * _MIN_BLOCKS_PER_VARIANT)
         and "" not in seconds
     )
     if not keyword_like:
