@@ -404,7 +404,10 @@ def cmd_sync(args: argparse.Namespace) -> int:
 
         result = _sync_one(repo, capture, key, args, relative, sync)
         report.results.append(result)
-        if result.outcome == batchlib.OK:
+        # A raw-mirrored device is kept for the same reason a modelled one is:
+        # left out of this set, prune would delete it as decommissioned on the
+        # next complete run.
+        if result.outcome in (batchlib.OK, batchlib.MIRRORED_RAW):
             keep.add(relative)
 
     # Firepower: several JSON endpoints per device, mirrored verbatim rather
@@ -452,7 +455,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
             state=freshnesslib.STALE if r.is_stale else freshnesslib.FRESH)
         for r in report.results
         if r.collected_at is not None
-        and r.outcome in (batchlib.OK, batchlib.MIRRORED)
+        and r.outcome in (batchlib.OK, batchlib.MIRRORED, batchlib.MIRRORED_RAW)
     ]
     repo.write_report("freshness.md", freshnesslib.render_report(fresh_inputs))
 
@@ -517,7 +520,36 @@ def _sync_one(repo, capture, key: bytes, args, relative: str,
 
     result.platform = detection.platform
     if model is None:
-        result.outcome, result.detail = batchlib.NO_PARSER, f"platform {detection.platform}"
+        # No parser, but a configuration we read and redacted all the same.
+        # Returning here used to throw it away: an ASA left nothing in the
+        # mirror at all, not even the text, so nobody could see that it had
+        # changed - or what it held - until someone wrote a parser for it.
+        # Versioning the text is most of the value and needs no model.
+        changed = repo.write_files(relative, {"raw.cfg": redacted})
+        if changed:
+            repo.write_meta(relative, yaml.safe_dump({
+                "platform": detection.platform,
+                "modelled": False,
+                "note": "Mirrored as text. No parser for this platform yet, so "
+                        "changes are visible in the diff but nothing is "
+                        "modelled and no policy check runs over it.",
+                "detection_confidence": detection.confidence,
+                "detection_scores": detection.scores,
+                "os_version": detection.os_version,
+                "redaction": {"tokens_written": redaction.total,
+                              "upstream_sanitised": redaction.upstream_sanitised},
+                "provenance": provenance.as_dict(),
+                "source": {"device_id": capture.device_id,
+                           "collected_at": capture.collected_at.isoformat(),
+                           "collector_id": capture.collector_id,
+                           "location": capture.location},
+            }, sort_keys=False, allow_unicode=True))
+            sync.changed.append(relative)
+            print(f"  changed  {relative[len(layout.ROOT) + 1:]}  (raw)")
+
+        sync.written.append(relative)
+        result.outcome = batchlib.MIRRORED_RAW
+        result.detail = f"platform {detection.platform}, no parser"
         return result
 
     result.modelled_pct = round(doc.coverage() * 100, 1)

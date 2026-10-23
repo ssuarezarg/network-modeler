@@ -253,11 +253,15 @@ is chosen from evidence.
 |---|---|
 | IOS, IOS-XE | supported |
 | NX-OS | supported — features, VXLAN/NVE, VLAN-to-VNI, nested BGP |
-| ASA, IOS-XR | detected, no parser — reported as unsupported |
+| ASA, IOS-XR | detected, no parser — mirrored as redacted text, not modelled |
 | Firepower / FTD | out of scope: arrives as `fmc_*` REST endpoints, not a flat config |
 
 An unsupported platform is reported rather than producing an empty model that
-would look valid.
+would look valid. Its configuration is still redacted and committed as
+`raw.cfg`, so a change to it shows in the diff and the device is covered by
+the freshness report; what is missing is the model and the policy checks that
+run over it. Mirroring the text needs no parser and is most of the value, so
+it should not wait for one.
 
 ## Running it in a container
 

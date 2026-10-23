@@ -27,6 +27,11 @@ OK = "ok"
 # rather than a configuration. Counted apart from OK so it cannot quietly drag
 # the coverage figures — there is no coverage to report for it.
 MIRRORED = "mirrored (json, no model)"
+# A flat CLI configuration we can read and redact but cannot yet model. Kept
+# apart from NO_PARSER, which now means nothing was stored at all: the
+# difference is whether the configuration is in the mirror and changes to it
+# are visible, which is most of the value and does not need a parser.
+MIRRORED_RAW = "mirrored (raw, no model)"
 TOO_SMALL = "capture too small"
 # The collector stored its own error message where a configuration should be.
 # Worth its own outcome: "too small" says the data is wrong, this says who can
@@ -40,7 +45,7 @@ ERROR = "error"
 # is a credential exposure upstream and should not be read after a list of
 # routine skips.
 OUTCOME_ORDER = [REDACTION_REFUSED, ERROR, COLLECTOR_ERROR, TOO_SMALL,
-                 NO_PARSER, MIRRORED, OK]
+                 NO_PARSER, MIRRORED_RAW, MIRRORED, OK]
 
 
 @dataclass
