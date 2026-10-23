@@ -441,7 +441,9 @@ def cmd_sync(args: argparse.Namespace) -> int:
             result = _sync_composite(repo, first, captures, key, sync,
                                      cli_capture=cli_rows.get(first.device_id))
             mirrored.append(result)
-            if result.outcome == batchlib.MIRRORED:
+            # Both outcomes, or prune deletes 24 devices as decommissioned
+            # the first night the CLI model lands.
+            if result.outcome in (batchlib.MIRRORED, batchlib.MIRRORED_MODELLED):
                 keep.add(result.path)
 
         # One device, two paths. Firepower has a `show running-config` row we
@@ -469,7 +471,8 @@ def cmd_sync(args: argparse.Namespace) -> int:
             state=freshnesslib.STALE if r.is_stale else freshnesslib.FRESH)
         for r in report.results
         if r.collected_at is not None
-        and r.outcome in (batchlib.OK, batchlib.MIRRORED, batchlib.MIRRORED_RAW)
+        and r.outcome in (batchlib.OK, batchlib.MIRRORED,
+                          batchlib.MIRRORED_MODELLED, batchlib.MIRRORED_RAW)
     ]
     fresh_inputs += [
         freshnesslib.Freshness(
@@ -743,6 +746,11 @@ def _sync_composite(repo, capture, captures, key: bytes,
         # uncollected for 44 days while the mirror held its configuration
         # from that morning - an alert wrong in the direction that gets
         # alerts ignored.
+        if running_config and running_config.get("modelled"):
+            result.outcome = batchlib.MIRRORED_MODELLED
+            result.modelled_pct = running_config["modelled_pct"]
+            result.accounted_pct = running_config["accounted_pct"]
+
         if cli_capture.collected_at and (
                 capture.collected_at is None
                 or cli_capture.collected_at > capture.collected_at):

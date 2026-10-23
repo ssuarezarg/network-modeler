@@ -71,7 +71,7 @@ def test_the_cli_configuration_is_modelled_beside_the_endpoints(repo):
     result, _ = _sync(repo, _capture("show running-config", FTD_CLI))
     directory = repo.path / "inventory/am5/ftd1"
 
-    assert result.outcome == batchlib.MIRRORED
+    assert result.outcome == batchlib.MIRRORED_MODELLED
     assert (directory / "fmc_devices.json").is_file()
     assert (directory / "running-config.yaml").is_file()
     assert (directory / "running-config.cfg").is_file()
@@ -158,3 +158,18 @@ def test_a_stale_source_is_reported_apart_from_an_uncaptured_device():
     assert "not captured in over" not in summary
     assert "source(s) stale on a device that is otherwise being captured" in summary
     assert "ftd1 (fmc endpoints)" in summary
+
+
+def test_a_modelled_firepower_counts_towards_coverage():
+    """The summary read "24 mirrored (json, no model)" for devices modelled at
+    98%, and left them out of the coverage table entirely - 73 modelled
+    devices reported where the repository held 97."""
+    from netconfig_mirror.batch import (BatchReport, DeviceResult,
+                                        MIRRORED_MODELLED)
+
+    report = BatchReport()
+    report.results = [DeviceResult(
+        hostname="ftd1", site="am5", outcome=MIRRORED_MODELLED,
+        platform="firepower", modelled_pct=98.0, accounted_pct=99.8)]
+
+    assert report.coverage_by_platform()["firepower"][0] == 1

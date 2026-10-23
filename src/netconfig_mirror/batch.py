@@ -32,6 +32,11 @@ MIRRORED = "mirrored (json, no model)"
 # difference is whether the configuration is in the mirror and changes to it
 # are visible, which is most of the value and does not need a parser.
 MIRRORED_RAW = "mirrored (raw, no model)"
+# Mirrored as JSON *and* modelled from the device's own CLI configuration.
+# Apart from MIRRORED because the summary read "no model" for 24 devices that
+# were modelled at 98%, and a count nobody can reconcile with the repository
+# is a count nobody checks.
+MIRRORED_MODELLED = "mirrored (json endpoints + cli model)"
 TOO_SMALL = "capture too small"
 # The collector stored its own error message where a configuration should be.
 # Worth its own outcome: "too small" says the data is wrong, this says who can
@@ -45,7 +50,7 @@ ERROR = "error"
 # is a credential exposure upstream and should not be read after a list of
 # routine skips.
 OUTCOME_ORDER = [REDACTION_REFUSED, ERROR, COLLECTOR_ERROR, TOO_SMALL,
-                 NO_PARSER, MIRRORED_RAW, MIRRORED, OK]
+                 NO_PARSER, MIRRORED_RAW, MIRRORED, MIRRORED_MODELLED, OK]
 
 
 @dataclass
@@ -123,7 +128,7 @@ class BatchReport:
     def coverage_by_platform(self) -> dict[str, tuple[int, float, float]]:
         grouped: dict[str, list[DeviceResult]] = {}
         for result in self.results:
-            if result.outcome == OK and result.platform:
+            if result.outcome in (OK, MIRRORED_MODELLED) and result.platform:
                 grouped.setdefault(result.platform, []).append(result)
         return {
             platform: (
