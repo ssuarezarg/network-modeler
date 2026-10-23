@@ -471,6 +471,16 @@ def cmd_sync(args: argparse.Namespace) -> int:
         if r.collected_at is not None
         and r.outcome in (batchlib.OK, batchlib.MIRRORED, batchlib.MIRRORED_RAW)
     ]
+    fresh_inputs += [
+        freshnesslib.Freshness(
+            device_key=r.secondary_label,
+            collected_at=r.secondary_collected_at,
+            state=(freshnesslib.STALE
+                   if datetime.now(timezone.utc) - r.secondary_collected_at
+                   > DEFAULT_STALE_AFTER else freshnesslib.FRESH))
+        for r in report.results
+        if r.secondary_label and r.secondary_collected_at
+    ]
     repo.write_report("freshness.md", freshnesslib.render_report(fresh_inputs))
 
     sites = sorted({r.site for r in modelled})
@@ -728,6 +738,18 @@ def _sync_composite(repo, capture, captures, key: bytes,
         if result.outcome == batchlib.REDACTION_REFUSED:
             return result
 
+        # The device's freshness is its newest capture; the FMC endpoints
+        # keep their own entry. Collapsing the two reported the device as
+        # uncollected for 44 days while the mirror held its configuration
+        # from that morning - an alert wrong in the direction that gets
+        # alerts ignored.
+        if cli_capture.collected_at and (
+                capture.collected_at is None
+                or cli_capture.collected_at > capture.collected_at):
+            result.collected_at = cli_capture.collected_at
+            result.secondary_label = f"{capture.label} (fmc endpoints)"
+            result.secondary_collected_at = capture.collected_at
+
     changed = repo.write_files(relative, rendered)
     if changed:
         repo.write_meta(relative, yaml.safe_dump({
@@ -736,7 +758,8 @@ def _sync_composite(repo, capture, captures, key: bytes,
             "note": "Mirrored as JSON endpoints from FMC. The device also has "
                     "a flat CLI configuration; where it was captured it is "
                     "modelled in running-config.yaml.",
-            "endpoints": sorted(rendered),
+            "endpoints": sorted(name for name in rendered
+                                if not name.startswith("running-config")),
             "running_config": running_config,
             "source": {"device_id": capture.device_id,
                        "collected_at": capture.collected_at.isoformat(),

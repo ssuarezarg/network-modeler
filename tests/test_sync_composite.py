@@ -129,3 +129,32 @@ def test_an_unusable_cli_row_says_so_rather_than_vanishing(repo):
 
     assert result.outcome == batchlib.MIRRORED
     assert _meta(repo)["running_config"]["captured"] is False
+
+
+def test_the_device_is_fresh_when_one_of_its_two_sources_is(repo):
+    """The mirror held these devices' configuration from that morning while
+    the alert said they had not been captured in 44 days. An alert wrong in
+    that direction is how 44 days pass."""
+    result, _ = _sync(repo, _capture("show running-config", FTD_CLI))
+
+    assert result.collected_at.day == 23
+    assert result.secondary_label == "ftd1 (fmc endpoints)"
+    assert result.secondary_collected_at.day == 13
+
+
+def test_a_stale_source_is_reported_apart_from_an_uncaptured_device():
+    """Two different problems with two different owners."""
+    from datetime import timedelta
+    from netconfig_mirror.batch import BatchReport, DeviceResult, MIRRORED, render_summary
+
+    now = datetime.now(timezone.utc)
+    report = BatchReport()
+    report.results = [DeviceResult(
+        hostname="ftd1", site="am5", outcome=MIRRORED,
+        collected_at=now, secondary_label="ftd1 (fmc endpoints)",
+        secondary_collected_at=now - timedelta(days=44))]
+
+    summary = render_summary(report)
+    assert "not captured in over" not in summary
+    assert "source(s) stale on a device that is otherwise being captured" in summary
+    assert "ftd1 (fmc endpoints)" in summary

@@ -62,6 +62,13 @@ class DeviceResult:
     modelled_pct: float | None = None
     accounted_pct: float | None = None
     collected_at: datetime | None = None
+    # A second source for the same device, when one exists and can rot on its
+    # own. Firepower has two: FMC endpoints and the device's own CLI capture,
+    # collected by different means. Reporting only one of them made the
+    # freshness alert say 24 devices had not been captured in 44 days while
+    # the mirror held their configuration from that morning.
+    secondary_label: str | None = None
+    secondary_collected_at: datetime | None = None
     path: str | None = None
 
     @property
@@ -180,15 +187,31 @@ def render_summary(report: BatchReport) -> str:
         for platform, (count, modelled, accounted) in coverage.items():
             lines.append(f"  {platform:<10} {count:>8} {modelled:>9.1f}% {accounted:>10.1f}%")
 
-    stale = [r for r in report.results if r.is_stale]
+    def _age(moment: datetime) -> int:
+        return (datetime.now(timezone.utc)
+                - moment.replace(tzinfo=moment.tzinfo or timezone.utc)).days
+
+    stale = [(r.hostname, r.collected_at) for r in report.results if r.is_stale]
     if stale:
         lines += ["", f"{len(stale)} device(s) not captured in over "
                       f"{DEFAULT_STALE_AFTER.days} days:"]
-        for result in sorted(stale, key=lambda r: r.collected_at or datetime.min):
-            age = (datetime.now(timezone.utc)
-                   - result.collected_at.replace(tzinfo=result.collected_at.tzinfo
-                                                 or timezone.utc)).days
-            lines.append(f"  {result.hostname:<24} {age:>4}d")
+        for hostname, collected_at in sorted(stale, key=lambda s: s[1] or datetime.min):
+            lines.append(f"  {hostname:<24} {_age(collected_at):>4}d")
+
+    # A source that stopped while the device itself kept being captured. Worth
+    # its own heading rather than a line in the list above: "not captured" and
+    # "captured, but one of its two sources died" are different problems with
+    # different owners, and merging them is what let 44 days pass with the
+    # alert reading as though 24 devices were unreachable.
+    stale_sources = [(r.secondary_label, r.secondary_collected_at)
+                     for r in report.results
+                     if r.secondary_label and r.secondary_collected_at
+                     and _age(r.secondary_collected_at) > DEFAULT_STALE_AFTER.days]
+    if stale_sources:
+        lines += ["", f"{len(stale_sources)} source(s) stale on a device that is "
+                      f"otherwise being captured:"]
+        for label, collected_at in sorted(stale_sources, key=lambda s: s[1]):
+            lines.append(f"  {label:<40} {_age(collected_at):>4}d")
 
     for outcome in (REDACTION_REFUSED, ERROR, COLLECTOR_ERROR, TOO_SMALL):
         affected = [r for r in report.results if r.outcome == outcome]
