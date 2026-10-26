@@ -281,16 +281,27 @@ changes as the device changes. An acknowledgement keyed on the sentence would
 silently stop matching, and the finding would start alerting again with nothing
 to explain why.
 
-The key carries the device's path in the mirror, not its hostname, because
-**hostnames are not unique in this estate** — two devices are called
-`EDGE-R1` and two more are called `Kernel`. Keyed on hostname they would
-produce the same string, and acknowledging one would silently acknowledge the
-other's finding too.
+The key carries the device's **hostname**, which belongs to the device, and
+not its path in the mirror, which encodes the site the collector reports for
+it. Paths were used first, to tell apart two devices sharing a name. They
+broke within three days: the collector split one site into two — the
+data-quality fix that had been asked for — every path moved, and six
+acknowledgements stopped matching and re-reported as new findings. Tying the
+key to the field most likely to be corrected was the mistake.
 
-So acknowledging a finding on one device does not cover the same mistake on
-another, which is right: it needs fixing there too. A key written as a bare
-hostname is still honoured, as the deliberately coarser match covering every
-device of that name.
+Acknowledging a finding on one device therefore covers the same finding on
+any device of that name. Where two records share a name because they are the
+same device captured twice, that is what you want. Where they are genuinely
+two devices it is not, and the name is the thing to fix — so the report lists
+every hostname held by more than one device directory, which keeps the
+coarseness visible instead of built into a key nobody reads.
+
+A key written in the older path form is still honoured, so a file written
+while paths were the key keeps working rather than re-reporting everything in
+it at once. The report also lists acknowledgements that match no finding:
+either the finding was fixed and the entry can go, or the key stopped
+matching — which looks exactly like a new finding, and is how six known
+issues re-reported themselves as fresh ones.
 
 ---
 

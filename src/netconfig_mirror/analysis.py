@@ -209,31 +209,36 @@ class Finding:
     def key(self) -> str:
         """Stable identity for acknowledgement.
 
-        Keyed on the mirror path rather than the hostname, because **hostnames
-        are not unique here**. Two devices share the name `EDGE-R1` and
-        two more share `Kernel`; keyed on hostname they produce the same string,
-        so acknowledging one would silently acknowledge the other's finding too.
+        Keyed on the **hostname**, which belongs to the device, and not on the
+        mirror path, which encodes the site the collector reports for it.
+        Paths were tried first, to tell apart two devices sharing a name. They
+        broke within three days: the collector split site `wcs` into `atl` and
+        `dal3` - the data-quality fix we had asked for - every path moved, and
+        six acknowledgements stopped matching and re-reported as new findings.
+
+        Tying the key to the field most likely to be corrected was the mistake,
+        and the collision it guarded against turned out not to be one: the two
+        devices sharing a name are the same device captured twice. A name that
+        really is shared by two devices is a defect to fix upstream, and
+        `duplicate_hostnames` reports it so the coarseness is never silent.
 
         Built from the structural parts, never from `detail`: the rendered
         sentence carries a "did you mean …?" suggestion that changes as the
         device's configuration changes, and an acknowledgement keyed on that
         would silently stop matching.
         """
-        device = self.path.split("/", 1)[-1] if self.path else self.hostname
-        return self._key_for(device)
+        return self._key_for(self.hostname)
 
     @property
     def keys(self) -> tuple[str, ...]:
         """Every string that acknowledges this finding.
 
-        The hostname form is still honoured so acknowledgement files written
-        before paths were used keep working. It is deliberately the coarser
-        match - it covers the finding on *every* device of that name - which is
-        why `--keys` emits the path form instead.
+        The path form is still honoured, so files written while paths were the
+        key keep working rather than re-reporting everything in them at once.
         """
-        precise = self.key
-        by_hostname = self._key_for(self.hostname)
-        return (precise,) if precise == by_hostname else (precise, by_hostname)
+        by_path = (self._key_for(self.path.split("/", 1)[-1])
+                   if self.path else self.key)
+        return (self.key,) if by_path == self.key else (self.key, by_path)
 
 
 
@@ -358,6 +363,34 @@ def _audit_asa(device: DeviceDoc, findings: list[Finding]) -> None:
 
 
 
+def duplicate_hostnames(devices: list[DeviceDoc]) -> dict[str, list[str]]:
+    """Hostnames held by more than one device directory.
+
+    Acknowledgements are keyed on the hostname, so a name shared by two real
+    devices means acknowledging one covers the other. That is acceptable only
+    while it is visible: this makes it a line in the report rather than a
+    property of the key nobody reads.
+    """
+    paths: dict[str, list[str]] = {}
+    for device in devices:
+        paths.setdefault(device.hostname, []).append(device.path)
+    return {name: sorted(found) for name, found in sorted(paths.items())
+            if len(found) > 1}
+
+
+def stale_acknowledgements(findings: list[Finding],
+                           acknowledged: set[str]) -> list[str]:
+    """Entries that no longer match any finding.
+
+    Either the finding was fixed - good, and the entry should go - or the key
+    stopped matching, which looks exactly like a new finding and is how six
+    known issues re-reported themselves as fresh ones on 2026-10-26. The
+    difference matters enough to be stated rather than inferred.
+    """
+    live = {key for finding in findings for key in finding.keys}
+    return sorted(entry for entry in acknowledged if entry not in live)
+
+
 def unacknowledged_dangling(findings: list[Finding]) -> list[Finding]:
     """Dangling references nobody has taken responsibility for yet.
 
@@ -369,7 +402,8 @@ def unacknowledged_dangling(findings: list[Finding]) -> list[Finding]:
 
 
 def render_audit(findings: list[Finding], devices: list[DeviceDoc],
-                 *, full: bool = False, per_device: int = 8) -> str:
+                 *, full: bool = False, per_device: int = 8,
+                 acknowledged: set[str] | None = None) -> str:
     dangling = [f for f in findings if f.kind in ACTIONABLE]
     orphaned = [f for f in findings if f.kind == ORPHANED]
 
@@ -425,5 +459,32 @@ def render_audit(findings: list[Finding], devices: list[DeviceDoc],
     else:
         lines.append("  None.")
     lines.append("")
+
+    collisions = duplicate_hostnames(devices)
+    if collisions:
+        lines += ["## Hostnames held by more than one device", "",
+                  "Acknowledgements are keyed on the hostname, so acknowledging "
+                  "one of",
+                  "these covers the other. Where the two are the same device "
+                  "captured",
+                  "twice that is what you want; where they are two devices it "
+                  "is not,",
+                  "and the name is the thing to fix.", ""]
+        for hostname, paths in collisions.items():
+            lines.append(f"  {hostname}")
+            lines += [f"      {path}" for path in paths]
+        lines.append("")
+
+    if acknowledged:
+        stale = stale_acknowledgements(findings, acknowledged)
+        if stale:
+            lines += [f"## {len(stale)} acknowledgement(s) matching no finding", "",
+                      "Either the finding was fixed and the entry can go, or the "
+                      "key stopped",
+                      "matching - which looks exactly like a new finding. Worth "
+                      "telling apart",
+                      "before adding anything.", ""]
+            lines += [f"  {entry}" for entry in stale]
+            lines.append("")
 
     return "\n".join(lines) + "\n"

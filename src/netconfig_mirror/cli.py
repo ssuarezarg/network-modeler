@@ -687,7 +687,8 @@ def cmd_audit(args: argparse.Namespace) -> int:
             print(finding.key)
         return EXIT_OK
 
-    report = analysis.render_audit(findings, devices, full=args.full)
+    report = analysis.render_audit(findings, devices, full=args.full,
+                                   acknowledged=acknowledged)
 
     if args.out_file:
         written = _write_report(args.out_file, report)

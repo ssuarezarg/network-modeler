@@ -8,8 +8,10 @@ from netconfig_mirror.analysis import (
     compare_policy,
     find_device,
     load_devices,
+    duplicate_hostnames,
     render_audit,
     render_comparison,
+    stale_acknowledgements,
     unacknowledged_dangling,
 )
 
@@ -204,12 +206,10 @@ def test_a_finding_key_ignores_the_suggestion_text(tmp_path):
                "route_maps": [{"name": "RM", "prefix_lists": ["Site_Alpha_in"]}]},
     })
     finding = [f for f in audit(devices) if f.kind == DANGLING][0]
-    # Keyed on the mirror path, which is unique; the hostname form stays valid
-    # as the coarser match for files written before paths were used.
-    assert finding.key == "dangling:dc4/r1:route-map RM:Site_Alpha_in"
-    # The hostname form stays valid as the coarser match, so acknowledgement
-    # files written before paths were used keep working.
-    assert "dangling:r1:route-map RM:Site_Alpha_in" in finding.keys
+    # Keyed on the hostname, which belongs to the device. The path form stays
+    # valid so files written while paths were the key keep working.
+    assert finding.key == "dangling:r1:route-map RM:Site_Alpha_in"
+    assert "dangling:dc4/r1:route-map RM:Site_Alpha_in" in finding.keys
     assert "did you mean" in finding.detail
     assert all("did you mean" not in k for k in finding.keys)
 
@@ -269,38 +269,75 @@ def test_keys_are_generated_not_transcribed(tmp_path):
     assert unacknowledged_dangling(audit(devices, {key})) == []
 
 
-def test_two_devices_sharing_a_hostname_get_different_keys(tmp_path):
-    """Hostnames are not unique in this estate: two devices are called
-    EDGE-R1 and two more are called Kernel. Keyed on hostname they
-    produce the same string, and acknowledging one silently acknowledges the
-    other's finding too."""
+def test_two_devices_sharing_a_hostname_share_a_key(tmp_path):
+    """Deliberate, and reversed on 2026-10-26. Path-based keys told these two
+    apart and broke three days later when the collector corrected the site,
+    moving every path. The two devices sharing a name here are the same device
+    captured twice, so one acknowledgement covering both is right - and where
+    it is not, `duplicate_hostnames` says so."""
     doc = {"device": {"hostname": "EDGE-R1"},
            "route_maps": [{"name": "BGP-to-OSPF", "prefix_lists": ["CORE-NETS"]}]}
-    (tmp_path / "inventory" / "site1" / "edge-r1-21b484e9").mkdir(parents=True)
-    (tmp_path / "inventory" / "site1" / "edge-r1-3b8259c4").mkdir(parents=True)
-    for name in ("edge-r1-21b484e9", "edge-r1-3b8259c4"):
-        (tmp_path / "inventory" / "site1" / name / "device.yaml").write_text(
+    for site, name in (("site1", "edge-r1"), ("site2", "edge-r1")):
+        (tmp_path / "inventory" / site / name).mkdir(parents=True)
+        (tmp_path / "inventory" / site / name / "device.yaml").write_text(
             yaml.safe_dump(doc), encoding="utf-8")
 
     devices = load_devices(tmp_path)
     keys = [f.key for f in audit(devices) if f.kind == DANGLING]
+
     assert len(keys) == 2
-    assert len(set(keys)) == 2
+    assert len(set(keys)) == 1
+    assert duplicate_hostnames(devices) == {
+        "EDGE-R1": ["inventory/site1/edge-r1", "inventory/site2/edge-r1"]}
 
 
-def test_acknowledging_one_of_a_shared_name_leaves_the_other_alerting(tmp_path):
-    from netconfig_mirror.analysis import unacknowledged_dangling
-
+def test_one_acknowledgement_covers_a_shared_name_and_the_report_says_so(tmp_path):
+    """The cost of the hostname key, made visible rather than silent."""
     doc = {"device": {"hostname": "EDGE-R1"},
            "route_maps": [{"name": "RM", "prefix_lists": ["MISSING"]}]}
-    for name in ("a-21b484e9", "a-3b8259c4"):
-        (tmp_path / "inventory" / "site1" / name).mkdir(parents=True)
-        (tmp_path / "inventory" / "site1" / name / "device.yaml").write_text(
+    for site in ("site1", "site2"):
+        (tmp_path / "inventory" / site / "edge-r1").mkdir(parents=True)
+        (tmp_path / "inventory" / site / "edge-r1" / "device.yaml").write_text(
             yaml.safe_dump(doc), encoding="utf-8")
 
     devices = load_devices(tmp_path)
-    first = audit(devices)[0].key
-    assert len(unacknowledged_dangling(audit(devices, {first}))) == 1
+    key = audit(devices)[0].key
+
+    assert unacknowledged_dangling(audit(devices, {key})) == []
+    assert "Hostnames held by more than one device" in render_audit(
+        audit(devices, {key}), devices)
+
+
+def test_a_site_rename_does_not_break_an_acknowledgement(tmp_path):
+    """What this change is for. The collector split site `wcs` into `atl` and
+    `dal3`, every mirror path moved, and six acknowledgements stopped matching
+    and re-reported as new findings."""
+    doc = {"device": {"hostname": "WCS-DAL3-ASR-R2"},
+           "route_maps": [{"name": "ospf-to-bgp", "prefix_lists": ["MISSING"]}]}
+    before = _mirror(tmp_path / "before", {"wcs-dal3-asr-r2": doc})
+    key = audit(before)[0].key
+
+    moved = tmp_path / "after" / "inventory" / "dal3" / "wcs-dal3-asr-r2"
+    moved.mkdir(parents=True)
+    (moved / "device.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
+
+    assert unacknowledged_dangling(audit(load_devices(tmp_path / "after"), {key})) == []
+
+
+def test_an_acknowledgement_matching_nothing_is_reported(tmp_path):
+    """A key that stopped matching looks exactly like a new finding. Six known
+    issues re-reported themselves as fresh ones that way."""
+    devices = _mirror(tmp_path, {
+        "r1": {"device": {"hostname": "r1"},
+               "route_maps": [{"name": "RM", "prefix_lists": ["MISSING"]}]},
+    })
+    findings = audit(devices, {"dangling:wcs/old-path:route-map RM:MISSING"})
+
+    assert stale_acknowledgements(findings, {"dangling:wcs/old-path:route-map RM:MISSING"}) \
+        == ["dangling:wcs/old-path:route-map RM:MISSING"]
+    report = render_audit(findings, devices,
+                          acknowledged={"dangling:wcs/old-path:route-map RM:MISSING"})
+    assert "acknowledgement(s) matching no finding" in report
 
 
 def test_a_hostname_keyed_acknowledgement_still_works(tmp_path):
@@ -386,7 +423,7 @@ def test_a_crypto_map_matching_a_missing_access_list(tmp_path):
     dangling = [f for f in audit(devices) if f.kind == DANGLING]
 
     assert len(dangling) == 1
-    assert dangling[0].key == "dangling:lac1/fw1:crypto map outside_map 10:GONE"
+    assert dangling[0].key == "dangling:fw1:crypto map outside_map 10:GONE"
 
 
 def test_a_crypto_map_matching_an_empty_access_list(tmp_path):
