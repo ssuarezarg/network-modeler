@@ -340,6 +340,26 @@ def test_an_acknowledgement_matching_nothing_is_reported(tmp_path):
     assert "acknowledgement(s) matching no finding" in report
 
 
+def test_a_capture_acknowledgement_is_not_reported_as_stale(tmp_path):
+    """One file, two readers.
+
+    `sync` reads the same file for the hostnames of devices whose capture
+    fails - four of them store the collector's own error instead of a
+    configuration. The audit never sees those, so calling them stale invites
+    deleting an entry that is doing real work, and the nightly run goes back
+    to red over something already raised.
+    """
+    devices = _mirror(tmp_path, {
+        "r1": {"device": {"hostname": "r1"},
+               "route_maps": [{"name": "RM", "prefix_lists": ["MISSING"]}]},
+    })
+    findings = audit(devices, set())
+
+    assert stale_acknowledgements(findings, {"UK-LD5-R316-RTR1"}) == []
+    report = render_audit(findings, devices, acknowledged={"UK-LD5-R316-RTR1"})
+    assert "matching no finding" not in report
+
+
 def test_a_hostname_keyed_acknowledgement_still_works(tmp_path):
     """Files written before paths were used must keep working — and that form
     is deliberately coarser: it covers every device of that name."""

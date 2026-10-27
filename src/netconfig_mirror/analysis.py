@@ -380,15 +380,25 @@ def duplicate_hostnames(devices: list[DeviceDoc]) -> dict[str, list[str]]:
 
 def stale_acknowledgements(findings: list[Finding],
                            acknowledged: set[str]) -> list[str]:
-    """Entries that no longer match any finding.
+    """Policy-finding entries that no longer match any finding.
 
     Either the finding was fixed - good, and the entry should go - or the key
     stopped matching, which looks exactly like a new finding and is how six
     known issues re-reported themselves as fresh ones on 2026-10-26. The
     difference matters enough to be stated rather than inferred.
+
+    One file, two readers. `sync` reads the same file for the hostnames of
+    devices whose *capture* is known to fail - four of them store the
+    collector's own error instead of a configuration - and those entries are
+    invisible to this audit. Reported as stale they would read as dead weight,
+    and deleting one puts the nightly run back to red over something already
+    raised. A finding key carries its kind and what it refers to, so it always
+    has colons in it; a bare hostname never does. That is the whole test, and
+    it is structural rather than a guess at which names look like devices.
     """
     live = {key for finding in findings for key in finding.keys}
-    return sorted(entry for entry in acknowledged if entry not in live)
+    return sorted(entry for entry in acknowledged
+                  if ":" in entry and entry not in live)
 
 
 def unacknowledged_dangling(findings: list[Finding]) -> list[Finding]:
