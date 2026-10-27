@@ -421,14 +421,19 @@ def cmd_sync(args: argparse.Namespace) -> int:
             repo.move(previous, relative)
             sync.renamed.append((previous, relative))
 
+        # Kept whatever this run makes of it. `prune` removes devices the
+        # database no longer returns, and this device is in the database: it
+        # was selected from it a few lines ago. Keying the set on the outcome
+        # instead made a bad night at the collector look like a decommissioning
+        # - a 65-byte error string in place of a configuration scored
+        # TOO_SMALL, the path was left out, and the device's modelled
+        # configuration was deleted from the mirror. Two devices short of the
+        # 10% landslide guard, so nothing refused and nothing warned; the
+        # deletion arrived as an ordinary commit.
+        keep.add(relative)
         result = _sync_one(repo, capture, key, args, relative, sync,
                            owns_path=capture.device_id not in composite_ids)
         report.results.append(result)
-        # A raw-mirrored device is kept for the same reason a modelled one is:
-        # left out of this set, prune would delete it as decommissioned on the
-        # next complete run.
-        if result.outcome in (batchlib.OK, batchlib.MIRRORED_RAW):
-            keep.add(relative)
 
     # Firepower: several JSON endpoints per device, mirrored verbatim rather
     # than modelled. Skipped entirely on a filtered run that named a vendor,
@@ -442,10 +447,9 @@ def cmd_sync(args: argparse.Namespace) -> int:
             result = _sync_composite(repo, first, captures, key, sync,
                                      cli_capture=cli_rows.get(first.device_id))
             mirrored.append(result)
-            # Both outcomes, or prune deletes 24 devices as decommissioned
-            # the first night the CLI model lands.
-            if result.outcome in (batchlib.MIRRORED, batchlib.MIRRORED_MODELLED):
-                keep.add(result.path)
+            # Same invariant as the main loop: in the database, so not
+            # decommissioned, whatever happened to tonight's capture.
+            keep.add(result.path)
 
         # One device, two paths. Firepower has a `show running-config` row we
         # cannot parse as well as its FMC endpoints; keeping both results would
